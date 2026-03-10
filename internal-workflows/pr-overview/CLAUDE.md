@@ -1,23 +1,22 @@
-# PR Review Workflow — Agent Instructions
+# Review Queue — Agent Instructions
 
-You are an agent that reviews open pull requests for merge readiness and generates a ranked merge meeting document.
+You are an agent that evaluates open pull requests and generates a prioritized review queue — an ordered list of what needs human attention, ranked by urgency and type.
 
 ## Task Checklist
 
 Create these as your todo items at the start. Mark each one as you complete it — do not stop until all are done.
 
 1. **Run fetch-prs.sh** — collect all PR data into artifacts/pr-review/
-2. **Run analyze-prs.py** — produce analysis.json with blocker statuses and merge order
-3. **Evaluate review comments** — spawn parallel sub-agents to read review files for `needs_review` PRs and return verdicts
-4. **Run test-merge-order.sh** — locally merge clean PRs in order, record which merged/conflicted
-5. **Find or create Merge Queue milestone** — get the milestone number
-6. **Sync PRs to milestone** — add clean PRs, remove ones with blockers
-7. **Comment on blocked PRs** — post blocker summaries on PRs not in the queue (only if PR was updated since last comment)
-8. **Write the merge meeting report** — fill the template with all data including merge test results
-9. **Update milestone description** — overwrite with the final report
-10. **Self-evaluate execution** — read `.ambient/rubric.md` and score your own efficiency (5 criteria, 25 points total)
+2. **Run analyze-prs.py** — produce analysis.json with blocker statuses, type classification, and review order
+3. **Evaluate PRs via sub-agents** — spawn parallel sub-agents to deeply read each PR's full comment stream and return verdicts
+4. **Find or create Review Queue milestone** — get the milestone number
+5. **Sync PRs to milestone** — add clean PRs, remove ones with blockers
+6. **Comment on blocked PRs** — post blocker summaries on PRs not in the queue (only if PR was updated since last comment)
+7. **Write the review queue report** — fill the template with all data
+8. **Update milestone description** — overwrite with the final report
+9. **Self-evaluate execution** — read `.ambient/rubric.md` and score your own efficiency (5 criteria, 25 points total)
 
-**Do not stop until all 10 items are done.** The self-evaluation is the final step.
+**Do not stop until all 9 items are done.** The self-evaluation is the final step.
 
 ## Workflow
 
@@ -55,60 +54,22 @@ Each `prs/{number}.json` file has this top-level structure:
     "deletions": 18,
     "changedFiles": 5,
     "labels": [{ "name": "bug" }],
-    "milestone": { "title": "Merge Queue" },
+    "milestone": { "title": "Review Queue" },
     "statusCheckRollup": [...],
-    "comments": [
-      {
-        "author": { "login": "github-actions" },
-        "body": "# Amber Code Review\n### Blocker Issues\n..."
-      }
-    ],
+    "comments": [...],
     "reviewDecision": "APPROVED",
     "files": [...]
   },
-  "reviews": [
-    {
-      "user": { "login": "reviewer", "type": "User" },
-      "state": "CHANGES_REQUESTED",
-      "body": "..."
-    }
-  ],
-  "review_comments": [
-    {
-      "user": { "login": "reviewer", "type": "User" },
-      "body": "inline comment text..."
-    }
-  ],
-  "check_runs": [
-    {
-      "name": "ci/build",
-      "conclusion": "success",
-      "status": "completed"
-    }
-  ],
-  "diff_files": [
-    {
-      "filename": "path/to/file.go",
-      "status": "modified",
-      "additions": 10,
-      "deletions": 3,
-      "patch": "@@ -1,5 +1,7 @@\n..."
-    }
-  ]
+  "reviews": [...],
+  "review_comments": [...],
+  "check_runs": [...],
+  "diff_files": [...]
 }
 ```
 
-**Critical data path notes:**
-
-- **PR comments** (including bot reviews like Amber Code Review) are at `pr.comments[]` — NOT at the top-level `reviews` or `review_comments`.
-- **Reviews** (approve/request changes) are at the top-level `reviews[]` with `user.login` and `state` fields. The `user.type` field is `"User"` for humans and `"Bot"` for GitHub Apps.
-- **Inline review comments** (code-level discussion threads) are at the top-level `review_comments[]` with `user.login`.
-- **CI status** is in both `pr.statusCheckRollup[]` and the top-level `check_runs[]`. Use `check_runs` as the primary source — it has the `conclusion` field.
-- **Milestone** is at `pr.milestone` — will be `null` or `{ "title": "..." }`.
-
 ### Phase 2: Analyze PRs
 
-Run the analysis script to evaluate every PR against the blocker checklist:
+Run the analysis script to evaluate every PR against the blocker checklist and classify by type:
 
 ```bash
 python3 ./scripts/analyze-prs.py --output-dir artifacts/pr-review
@@ -116,42 +77,64 @@ python3 ./scripts/analyze-prs.py --output-dir artifacts/pr-review
 
 This produces:
 
-- `artifacts/pr-review/analysis.json` — compact summary with stats, merge order, overlap data, and a `pr_index` (one line per PR: number, rank, title, author, fail_count, review_status). Small enough to read in one go.
-- `artifacts/pr-review/analysis/{number}.json` — full per-PR analysis (all blocker statuses, details, labels, notes). Read these when you need detail on specific PRs.
+- `artifacts/pr-review/analysis.json` — compact summary with stats, review order, overlap data, and a `pr_index` (one line per PR with number, rank, title, author, type, fail_count, review_status).
+- `artifacts/pr-review/analysis/{number}.json` — full per-PR analysis (all blocker statuses, type classification, details).
+- `artifacts/pr-review/reviews/{number}/` — unified chronological comment stream per PR:
+  - `meta.json` — PR number, title, author, total comment count
+  - `01.json`, `02.json`, ... — each comment in chronological order with timestamp, author, body, and source hint
 
-The script prints a `needs_review` list of PR numbers that require your evaluation. The summary file also has a `needs_review` array.
+### Phase 3: Per-PR Sub-Agent Evaluation
 
-**Review comments require evaluation.** Use **parallel sub-agents** to evaluate the `needs_review` PRs so the raw comment data doesn't flood your main context and evaluation runs fast.
+This is where the real intelligence lives. The analyze script does mechanical checks (CI, conflicts, Jira, staleness). The sub-agents do the nuanced reading — understanding review conversations, judging comment validity, assessing overall PR health.
 
-Split the `needs_review` list into batches of ~10 PRs each and spawn sub-agents **in parallel** (multiple Task calls in a single message). Use this prompt for each batch:
+**Spawn one sub-agent per batch of ~10 PRs.** Use this prompt for each batch:
 
-> Evaluate review comments for the PRs listed below. For each PR:
+> Evaluate each PR listed below. For each PR:
 >
-> 1. Read `artifacts/pr-review/reviews/{number}/meta.json` to see how many comments there are
-> 2. Read the comment files **from highest number to lowest** (newest first): `reviews/{number}/05.json`, `04.json`, etc.
-> 3. Each comment file has: `source` (pr_comment / review / inline_comment), `author`, `body`, and optionally `state` or `path`
-> 4. Stop reading once you've found the latest bot review (author contains "github-actions" or "[bot]") and have enough context to judge
+> 1. Read `artifacts/pr-review/analysis/{number}.json` to see the mechanical check results and the PR's `updatedAt` timestamp
+> 2. Read `artifacts/pr-review/reviews/{number}/meta.json` to see the comment count
+> 3. Read ALL comment files in `reviews/{number}/` in order (01.json, 02.json, ...) — these are the full chronological comment stream including human reviews, bot reviews, inline comments, and discussion. Do not skip any.
+> 4. Understand the full conversation arc: who reviewed, what they said, whether issues were addressed, whether reviews are stale (old commits), whether there's unresolved disagreement
 >
-> **Bot review comments (e.g., "Amber Code Review") are real code reviews.** They analyzed the actual diff. Evaluate the latest bot review's findings by severity:
+> For each PR, return a verdict with these fields:
+> - **number**: PR number
+> - **verdict**: `ready` (no blockers, needs human approval), `almost` (1 minor issue), `blocked` (real blockers), `stale` (abandoned/inactive)
+> - **review_summary**: 1-2 sentences capturing the review state — who reviewed, what was raised, whether it was addressed. Be specific.
+> - **action_needed**: What a human should do next (e.g., "Approve — all feedback addressed", "Author needs to fix CI", "Reviewer @alice has unresolved concern about error handling")
+> - **action_owner**: Who needs to act — `@author`, `@reviewer`, `@maintainer`, or a specific username
+> - **blockers_from_comments**: List of genuine blockers found in comments (empty list if none). Only real issues — not style nits, not stale bot findings on old commits.
 >
-> - **Blocker issues** → always FAIL. These are showstoppers (compile errors, security vulnerabilities, data races, missing auth).
-> - **Critical issues** → FAIL, but explain WHY it's blocking in your summary. These are serious (incorrect logic, missing error handling on critical paths, breaking changes).
-> - **Major issues** → usually NOT a blocker. Only FAIL if the major issue would cause a real bug or regression in production. Style issues, naming concerns, missing docs, or "nice to have" improvements marked as Major are NOT blockers.
-> - **Minor issues** → never a blocker. Pass.
->
-> For each PR, return: PR number, verdict (FAIL or pass), and a 1-2 sentence explanation of your reasoning. For FAIL, describe the specific issue. For pass, briefly note what was found and why it's not blocking (e.g., "Major: naming suggestion — style only, not blocking").
+> Key judgment calls:
+> - A bot review from 3 weeks ago on a different commit is probably stale — note it but don't block on it
+> - A human requesting changes, author pushing a fix, but no re-approval = needs reviewer to re-review, not a blocker from comments
+> - "nit" comments or style suggestions with CHANGES_REQUESTED state = not a real blocker, note the mismatch
+> - Multiple rounds of review with all issues addressed = ready for approval
+> - Unresolved substantive disagreement = blocked, explain the disagreement
 >
 > PRs to evaluate: {batch list}
 
-Each comment is a small file — no truncation, no size limits. The sub-agent reads newest first and stops early once it has a verdict.
+Collect all verdicts from the parallel sub-agents and update each PR's review data before proceeding.
 
-Collect all verdicts from the parallel sub-agents and update each PR's `review_status` and `fail_count` in your working data before proceeding.
+**Do not rewrite the analysis script.** If you need to adjust a deterministic check, edit `scripts/analyze-prs.py` directly.
 
-**Do not rewrite the analysis script.** If you need to adjust a deterministic check, edit `scripts/analyze-prs.py` directly. Do **not** write the final report yet — the milestone count is needed first (see Phase 3).
+## PR Type Classification
+
+The analysis script classifies each PR into a type based on labels, branch name, title, and diff shape:
+
+| Type | Signals | Priority |
+|------|---------|----------|
+| `bug-fix` | `bug`/`fix` labels, `fix/`/`bugfix/`/`hotfix/` branch, `fix:` title prefix | Highest |
+| `feature` | `feature`/`enhancement` labels, `feat/` branch, `feat:` title prefix | High |
+| `refactor` | `refactor`/`cleanup` labels, `refactor/` branch, `refactor:` prefix | Medium |
+| `chore` | `chore` label, `chore/` branch, CI/config-only changes | Medium |
+| `docs` | `docs` label, `docs/` branch, markdown-only changes | Lower |
+| `unknown` | No clear signals — sub-agent should refine based on diff content | Lowest |
+
+The sub-agent can override the script's classification if the diff tells a different story.
 
 ## Blocker Checklist
 
-For **every** open PR, evaluate each of these six categories. Each is either clear or a blocker/warning.
+For **every** open PR, evaluate each of these categories. Each is either clear or a blocker/warning.
 
 ### 1. CI
 
@@ -164,21 +147,18 @@ For **every** open PR, evaluate each of these six categories. Each is either cle
 
 - Check the `mergeable` field.
 - **Clear:** `MERGEABLE`.
-- **Blocker:** `CONFLICTING` or `UNKNOWN`. Note which files overlap with other open PRs if detectable.
+- **Warn:** `UNKNOWN` — GitHub hasn't computed mergeability yet. Not a blocker.
+- **Blocker:** `CONFLICTING`. Note which files overlap with other open PRs if detectable.
 
 ### 3. Review Comments
 
 The script handles two deterministic checks automatically:
-- **CHANGES_REQUESTED** without a subsequent APPROVED or DISMISSED → `FAIL`
-- **Inline review threads** (from `review_comments[]`) → `FAIL` with count
+- **CHANGES_REQUESTED** without a subsequent APPROVED or DISMISSED
+- **Inline review threads** (from `review_comments[]`)
 
-For PRs with `review_status: "needs_review"`, sub-agents evaluate the comments (see Phase 2). The key severity rules:
+Everything else — bot reviews, human discussion, comment arcs — is evaluated by the sub-agents who read the full comment stream and make judgment calls. See Phase 3 for the sub-agent prompt.
 
-- **Blocker/Critical** bot review findings → `FAIL` (with reasoning in the report)
-- **Major** findings → usually `pass` unless it's a real bug/regression risk. Most Majors are style, naming, or improvement suggestions — not merge blockers.
-- **Minor** findings → always `pass`
-
-When marking a PR as FAIL in the report, include a brief explanation of the actual issue so the team can act on it — don't just say "Bot review: FAIL".
+When marking a PR as FAIL in the report, include a brief explanation of the actual issue so the team can act on it.
 
 ### 4. Jira Hygiene
 
@@ -192,11 +172,11 @@ When marking a PR as FAIL in the report, include a brief explanation of the actu
 
 - Check the `is_fork` field in the per-PR analysis.
 - **Fork PRs do not receive automated agent reviews** (the Amber review bot only runs on internal branches).
-- If `is_fork` is `true`: mark as `warn` with "Fork PR — no automated agent review". This is not a merge blocker, but the report must flag it clearly so a maintainer knows manual review is required.
+- If `is_fork` is `true`: mark as `warn` with "Fork PR — no automated agent review". This is not a merge blocker, but the report must flag it so a maintainer knows manual review is required.
 
 ### 6. Staleness
 
-The analysis script flags PRs older than 30 days and detects potential supersession (newer PRs with similar branches/titles). But **use your judgment** beyond the script's output — the script provides `days_since_update`, `recommend_close`, and `superseded_by` fields as signals, not final verdicts.
+The analysis script flags PRs older than 30 days and detects potential supersession (newer PRs with similar branches/titles). Use your judgment beyond the script's output — the script provides `days_since_update`, `recommend_close`, and `superseded_by` fields as signals, not final verdicts.
 
 Consider recommending closure for PRs that show multiple signs of abandonment:
 - Draft PR + merge conflicts + no activity in 3+ weeks
@@ -204,49 +184,19 @@ Consider recommending closure for PRs that show multiple signs of abandonment:
 - Superseded by a newer PR from the same author
 - Very old (60+ days) regardless of other signals
 
-Do not waste report space on these — use the condensed "Recommend Closing" table instead of a full blocker breakdown.
+Use the condensed "Recommend Closing" table instead of a full blocker breakdown for these.
 
 ## Ranking Logic
 
-Produce a single ranked list of all open PRs, ordered by merge readiness:
+Produce a single ranked list of all open PRs, ordered by what needs human attention first:
 
-1. **Blocker count** — PRs with zero blockers first, then one, then two, etc.
-2. **Priority labels** — within the same blocker count, PRs with `priority/critical`, `bug`, or `hotfix` labels rank higher.
-3. **Size (smaller first)** — PRs with fewer changed files and smaller diffs rank higher, reducing merge risk.
-4. **Line-level conflict risk** — use diff hunk data (see below) to determine which mergeable PRs would actually collide. Rank the smaller PR first within a conflict pair.
-5. **Dependency chains** — if a PR's branch is based on another PR's branch, the base PR must rank higher. Note these explicitly.
-6. **Draft PRs last** — drafts always sort to the bottom regardless of other signals.
-
-## Diff Hunk Analysis (Merge Order Optimisation)
-
-For mergeable (non-draft) PRs, the fetch script collects `diff_files` — an array of per-file objects containing the `patch` field with actual diff content. Use this data to detect **line-level overlaps** between mergeable PRs and optimise merge order.
-
-### How to parse hunks
-
-Each `patch` string contains one or more hunk headers in unified diff format:
-
-```
-@@ -oldStart,oldCount +newStart,newCount @@ optional context
-```
-
-Extract the `newStart` and `newCount` values (the `+` side) for each hunk. These represent the line ranges the PR modifies in the target file. A hunk touches lines `newStart` through `newStart + newCount - 1`.
-
-### How to detect overlaps
-
-For every pair of mergeable PRs (A, B):
-
-1. Find files that appear in both `diff_files` arrays (match on `filename`).
-2. For each shared file, compare hunk ranges. Two hunks overlap if:
-   - Hunk A: lines `a_start` to `a_start + a_count - 1`
-   - Hunk B: lines `b_start` to `b_start + b_count - 1`
-   - Overlap exists when `a_start <= b_start + b_count - 1` AND `b_start <= a_start + a_count - 1`
-3. If any hunk pair overlaps, the two PRs have a **line-level conflict risk**.
-
-### How to use overlap data
-
-- **No overlapping hunks** between two PRs that touch the same file: they can merge in any order safely. Note this as "same file, no line overlap" — it's good news.
-- **Overlapping hunks**: merge the smaller PR first to minimise rebase pain. Flag the overlap in the `{{NOTES}}` field with the specific file and line ranges.
-- When multiple mergeable PRs form a chain of overlaps (A overlaps B, B overlaps C), recommend a specific merge sequence and explain why.
+1. **PR type** — bug fixes before features before refactors before docs/chores. Unknown types sort after features.
+2. **Blocker count** — within the same type, PRs with zero blockers first.
+3. **Readiness** — PRs that just need a human approval rank above PRs that need author work.
+4. **Size (smaller first)** — PRs with fewer changed files and smaller diffs rank higher. Small PRs are faster to review.
+5. **Priority labels** — `priority/critical`, `bug`, `hotfix` labels boost rank within their tier.
+6. **Dependency chains** — if a PR's branch is based on another PR's branch, the base PR must rank higher. Note these explicitly.
+7. **Draft PRs last** — drafts always sort to the bottom regardless of other signals.
 
 ## Status Indicators
 
@@ -260,7 +210,7 @@ Use these in the **Status** column of the per-PR blocker table:
 
 ## Output Format
 
-Use the template at `templates/merge-meeting.md`. Populate it from `analysis.json`.
+Use the template at `templates/review-queue.md`. Populate it from `analysis.json` and sub-agent verdicts.
 
 ### Dates
 
@@ -268,98 +218,55 @@ Use absolute dates in `YYYY-MM-DD` format (e.g., `2026-02-27`). Do not use relat
 
 ### At a Glance
 
-A 2-3 sentence summary at the top of the report. Mention how many PRs are ready, call out the top 3-4 smallest ones by number, and flag any notable concerns (e.g., "3 PRs recommended for closure", "6 PRs blocked by merge conflicts").
+A 2-3 sentence summary at the top of the report. Mention how many PRs are ready for review, call out the top 3-4 by number and type, and flag any notable concerns (e.g., "3 PRs recommended for closure", "6 PRs blocked by merge conflicts").
 
-### Clean PRs (condensed table)
+### Ready for Review (condensed table)
 
-PRs with `fail_count == 0` and `isDraft == false` go in the condensed summary table — one row per PR. List them in the order from the `merge_order` array (smallest and least conflicting first).
+PRs with `fail_count == 0` and `isDraft == false` go in the condensed summary table — one row per PR. List them in review order (bug fixes first, smallest first).
 
-For fork PRs (`is_fork == true`), add "🍴 Fork — no agent review" to the Notes column so maintainers know manual review is needed.
+For fork PRs (`is_fork == true`), add "Fork — no agent review" to the Notes column.
 
-The **Merge Test** column shows the result from `test-merge-order.sh`:
-- `merged` — PR merged cleanly on top of all previous PRs in the sequence
-- `CONFLICT` — merge failed; note the conflicting file(s)
-- `not attempted` — skipped because an earlier PR conflicted
-
-The **Notes** column: overlap warnings, jira hygiene, or "—".
-
-After the table, if any PR conflicted, add a **Resolution Strategy** section explaining:
-- Which PRs conflicted and on which files
-- Who owns the conflicting PR and what they need to do (rebase on top of which PR)
-- Which downstream PRs are blocked and will need rebasing once the conflict is resolved
+The **Action Needed** column: what a human reviewer should do (from sub-agent verdict).
 
 ### PRs With Blockers (full tables)
 
-PRs with `fail_count > 0` and `isDraft == false` get the full blocker table. PRs flagged with `recommend_close == true` go in the "Recommend Closing" table instead — do **not** give them a full blocker breakdown.
+PRs with `fail_count > 0` and `isDraft == false` get the full blocker table. PRs flagged with `recommend_close == true` go in the "Recommend Closing" table instead.
 
 ### Fork PRs
 
-Fork PRs are **not** separated into their own section. They appear in the same Clean PRs or PRs With Blockers tables as internal PRs, based on their blocker count — just like any other PR.
+Fork PRs are **not** separated into their own section. They appear in the same Ready for Review or PRs With Blockers tables as internal PRs, based on their blocker count.
 
-To signal that a PR is from a fork, add "🍴 Fork — no agent review" to the **Notes** column. If the `fork_owner` field is available, include it: "🍴 Fork (`fork_owner`) — no agent review". This gives maintainers a clear visual indicator without fragmenting the report.
+To signal that a PR is from a fork, add "Fork (`fork_owner`) — no agent review" to the **Notes** column.
 
 ### Recommend Closing
 
-PRs flagged by the script (`recommend_close == true`) or that you judge to be abandoned. One-row-per-PR table with: PR link, author, reason, last updated (relative). Use your judgment to add PRs the script missed.
-
-### Status indicators
-
-| Status | Meaning |
-|--------|---------|
-| `pass` | No issues detected |
-| `FAIL` | Blocker — must be resolved before merge |
-| `warn` | Hygiene / informational issue — does not block merge |
-
-## Phase 3: Test Merge Order
-
-After analysis and review evaluation, test the merge order locally to verify clean PRs actually merge without conflicts:
-
-```bash
-MERGE_ORDER=$(python3 -c "import json; d=json.load(open('artifacts/pr-review/analysis.json')); print(' '.join(str(n) for n in d['merge_order']))")
-
-./scripts/test-merge-order.sh \
-  --repo <owner/repo> \
-  --repo-dir /workspace/repos/<repo-name> \
-  --prs "$MERGE_ORDER"
-```
-
-This creates a temporary local branch, fetches all PR refs (including forks via `refs/pull/*/head`), and merges each PR in sequence. It stops on the first conflict and reports results as JSON.
-
-**The script NEVER pushes to any remote.** The push URL is overridden to `/dev/null` and the tmp branch is deleted on exit.
-
-Use the results to:
-- Mark each clean PR's merge test result in the report table (merged / conflict / not attempted)
-- For conflicts: note the conflicting files and which PR pair caused it
-- For not-attempted PRs: explain why (blocked by earlier conflict)
-- Add a **resolution strategy** after the table explaining what needs to happen to unblock the remaining PRs (who needs to rebase, which file, what the conflict is about)
-
-If the merge test script is not available or fails, skip this phase and note it in the report.
+PRs flagged by the script (`recommend_close == true`) or that you judge to be abandoned. One-row-per-PR table with: PR link, author, reason, last updated.
 
 ## Phase 4: Milestone Management
 
-Manage the **"Merge Queue"** milestone. This milestone acts as a living bucket of ready-to-merge PRs — no due date, never closed, updated every run. The milestone description stores the report and per-PR analysis timestamps, which are used as state on subsequent runs.
+Manage the **"Review Queue"** milestone. This milestone acts as a living bucket of ready-to-review PRs — no due date, never closed, updated every run. The milestone description stores the report.
 
 **Important: complete milestone sync BEFORE writing the final report** so that `{{MILESTONE_COUNT}}` in the report is accurate.
 
 ### Step 1: Find or create the milestone
 
 ```bash
-# Find existing milestone
-MILESTONE_NUM=$(gh api "repos/{owner}/{repo}/milestones" --jq '.[] | select(.title=="Merge Queue") | .number')
+# Find existing milestone (check both names for backward compat)
+MILESTONE_NUM=$(gh api "repos/{owner}/{repo}/milestones" --jq '.[] | select(.title=="Review Queue" or .title=="Merge Queue") | .number')
 
 # If not found, create it
 if [ -z "$MILESTONE_NUM" ]; then
   MILESTONE_NUM=$(gh api "repos/{owner}/{repo}/milestones" \
-    -f title="Merge Queue" \
+    -f title="Review Queue" \
     -f state=open \
-    -f description="Auto-managed by PR Overview workflow" \
+    -f description="Auto-managed by Review Queue workflow" \
     --jq '.number')
 fi
 ```
 
 ### Step 2: Sync PRs to the milestone
 
-First, get the list of PRs currently in the milestone (this catches merged/closed PRs that the fetch script wouldn't see since it only fetches open PRs):
+First, get the list of PRs currently in the milestone:
 
 ```bash
 gh api "repos/{owner}/{repo}/issues?milestone=${MILESTONE_NUM}&state=all&per_page=100" \
@@ -382,23 +289,18 @@ Then sync:
 
 After syncing, count the PRs now in the milestone — this is `{{MILESTONE_COUNT}}` for the report.
 
-### Step 3: Reorder PRs in the milestone to match merge order
+### Step 3: Reorder PRs in the milestone to match review order
 
-GitHub supports reordering issues within a milestone via a GraphQL mutation. After syncing, reorder the PRs to match the `merge_order` from the analysis.
-
-First, get the milestone's node ID and each PR's node ID:
+GitHub supports reordering issues within a milestone via a GraphQL mutation. After syncing, reorder the PRs to match the `review_order` from the analysis.
 
 ```bash
 # Get milestone node ID
 MILESTONE_NODE_ID=$(gh api "repos/{owner}/{repo}/milestones/${MILESTONE_NUM}" --jq '.node_id')
 
-# Get PR node IDs (for each PR in merge_order)
+# Get PR node IDs (for each PR in review_order)
 PR_NODE_ID=$(gh api "repos/{owner}/{repo}/pulls/{number}" --jq '.node_id')
-```
 
-Then reorder by calling the mutation for each PR in sequence, setting `prevId` to the previous PR's node ID:
-
-```bash
+# Reorder
 gh api graphql -f query='
   mutation {
     reprioritizeMilestoneIssue(input: {
@@ -412,20 +314,16 @@ gh api graphql -f query='
 '
 ```
 
-For the first PR in the order, omit `prevId` (it goes to the top). For each subsequent PR, set `prevId` to the PR that should come before it.
-
-**Note:** This is an undocumented GitHub GraphQL mutation. If it fails, skip silently — the milestone description still has the merge order in the report.
+For the first PR in the order, omit `prevId`. If the mutation fails, skip silently.
 
 ### Step 4: Write the final report
 
-Now that milestone sync is complete and `{{MILESTONE_COUNT}}` is known, write the final report to `artifacts/pr-review/merge-meeting-{YYYY-MM-DD}.md` using the template.
+Now that milestone sync is complete and `{{MILESTONE_COUNT}}` is known, write the final report to `artifacts/pr-review/review-queue-{YYYY-MM-DD}.md` using the template.
 
 ### Step 5: Update milestone description with the report
 
-Overwrite the milestone description with the final report, prefixed with a timestamp:
-
 ```bash
-REPORT=$(cat artifacts/pr-review/merge-meeting-{date}.md)
+REPORT=$(cat artifacts/pr-review/review-queue-{date}.md)
 TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
 DESCRIPTION="**Last updated:** ${TIMESTAMP}
 
@@ -440,95 +338,50 @@ gh api -X PATCH "repos/{owner}/{repo}/milestones/${MILESTONE_NUM}" \
 - The milestone has **no due date** — it persists as a running bucket.
 - Do **NOT** close the milestone — it is reused across runs.
 - The description is **overwritten** each run (not appended).
-- Always include the `Last updated` timestamp at the top of the description.
+- Always include the `Last updated` timestamp at the top.
 
-## Phase 5: Comment on Blocked PRs
+## Phase 6: Comment on Blocked PRs
 
-After milestone sync, post a blocker summary comment on each PR that has blockers (`fail_count > 0`) and was **not** added to the Merge Queue. This gives PR authors direct feedback on what's blocking their PR.
+After milestone sync, post a blocker summary comment on each PR that has blockers (`fail_count > 0`) and was **not** added to the Review Queue.
 
-**All comments are identified by a hidden HTML marker:** `<!-- pr-overview-bot -->` at the end of the comment body. This is how you find and manage previous comments from this workflow.
+**All comments are identified by a hidden HTML marker:** `<!-- review-queue-bot -->` at the end of the comment body.
 
 ### Noise reduction rules
 
-To avoid spamming PRs with redundant comments:
-
-1. **Find existing comment:** For each blocked PR, list its comments and look for one containing `<!-- pr-overview-bot -->`.
-2. **Check freshness:** If an existing comment is found, compare the PR's `updatedAt` timestamp with the comment's `created_at` timestamp.
-   - If the PR was **not updated** since the last comment → **skip** (the existing comment is still current).
-   - If the PR **was updated** since the last comment → **delete** the old comment, then **post** a new one.
+1. **Find existing comment:** Look for one containing `<!-- review-queue-bot -->` (also check for legacy `<!-- pr-overview-bot -->` marker).
+2. **Check freshness:** Compare the PR's `updatedAt` with the comment's `created_at`.
+   - If the PR was **not updated** since the last comment — **skip**.
+   - If the PR **was updated** — **delete** the old comment, then **post** a new one.
 3. **No existing comment:** Post a new comment.
-
-### Finding and deleting old comments
-
-```bash
-# List comments and find the one with our marker
-OLD_COMMENT_ID=$(gh api "repos/{owner}/{repo}/issues/{number}/comments" \
-  --jq '.[] | select(.body | contains("<!-- pr-overview-bot -->")) | .id')
-
-# Delete it if found
-if [ -n "$OLD_COMMENT_ID" ]; then
-  gh api -X DELETE "repos/{owner}/{repo}/issues/comments/${OLD_COMMENT_ID}"
-fi
-```
-
-### Per-PR analysis file structure
-
-Each `analysis/{number}.json` has blocker statuses as **top-level fields** (not nested under a `blockers` key). The fields you need for the comment:
-
-| Field | Example | Purpose |
-|-------|---------|---------|
-| `ci_status` | `"pass"`, `"FAIL"`, `"warn"` | CI check result |
-| `ci_detail` | `"Failing: build"` or `"—"` | CI detail text |
-| `conflict_status` | `"pass"`, `"FAIL"` | Merge conflict result |
-| `conflict_detail` | `"Has merge conflicts"` or `"—"` | Conflict detail text |
-| `review_status` | `"pass"`, `"FAIL"`, `"needs_review"` | Review result |
-| `review_detail` | `"CHANGES_REQUESTED from @user"` | Review detail text |
-| `jira_status` | `"pass"`, `"warn"` | Jira hygiene result |
-| `jira_detail` | `"No Jira reference found"` or `"—"` | Jira detail text |
-| `stale_status` | `"pass"`, `"FAIL"` | Staleness result |
-| `stale_detail` | `"Last updated 2026-01-15 — 47 days ago"` | Staleness detail text |
-| `overlap_status` | `"pass"`, `"FAIL"`, `"warn"`, `"—"` | Diff overlap result |
-| `overlap_detail` | `"Line overlap with #456 on file.go"` | Overlap detail text |
-| `fail_count` | `2` | Total number of FAIL statuses |
-| `isDraft` | `false` | Whether PR is a draft |
-| `recommend_close` | `false` | Whether PR is flagged for closure |
-| `updatedAt` | `"2026-02-20"` | PR last updated date (truncated to date) |
 
 ### Comment format
 
-Post a concise, actionable comment listing the blocker statuses:
-
 ```markdown
-### Merge Readiness — Blockers Found
+### Review Queue — Blockers Found
 
 | Check | Status | Detail |
 |-------|--------|--------|
 | CI | FAIL | `build` failed |
-| Merge conflicts | pass | — |
+| Merge conflicts | pass | --- |
 | Review comments | FAIL | Changes requested by @reviewer |
 | Jira hygiene | pass | RHOAIENG-1234 |
-| Staleness | pass | — |
-| Diff overlap risk | pass | — |
+| Staleness | pass | --- |
+| Diff overlap risk | pass | --- |
 
-> This comment is auto-generated by the PR Overview workflow and will be updated when the PR changes.
+**Action needed:** Author needs to fix CI and address review comments.
 
-<!-- pr-overview-bot -->
+> This comment is auto-generated by the Review Queue workflow and will be updated when the PR changes.
+
+<!-- review-queue-bot -->
 ```
 
-Include all six blocker categories. Use `pass`, `FAIL`, or `warn` in the Status column, reading directly from the `*_status` fields. Use the corresponding `*_detail` field for the Detail column.
-
-### Posting the comment
-
-```bash
-gh api "repos/{owner}/{repo}/issues/{number}/comments" \
-  -f body="${COMMENT_BODY}"
-```
+Include the **Action needed** line from the sub-agent verdict when available.
 
 ### What to skip
 
 - **Clean PRs** (fail_count == 0) — no comment needed, they're in the queue.
-- **Draft PRs** — don't comment on drafts, the author hasn't marked them ready.
-- **PRs recommended for closing** — don't comment, they'll be flagged in the report instead.
+- **Draft PRs** — don't comment on drafts.
+- **PRs recommended for closing** — don't comment, they'll be flagged in the report.
 
 ## Important Notes
 

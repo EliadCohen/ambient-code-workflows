@@ -18,9 +18,46 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 
-# ── Jira exclusions ──────────────────────────────────────────────────────────
+# -- Jira exclusions --
 JIRA_EXCLUDE = {"CVE", "GHSA", "HTTP", "API", "URL", "PR", "WIP"}
 
+# -- PR type priority (lower = higher priority in the queue) --
+TYPE_SIGNALS = {
+    "bug-fix": {
+        "labels": {"bug", "bugfix", "fix"},
+        "branches": ("fix/", "bugfix/", "hotfix/", "bug/"),
+        "titles": ("fix:", "fix(", "bugfix:", "hotfix:"),
+    },
+    "feature": {
+        "labels": {"feature", "enhancement"},
+        "branches": ("feat/", "feature/"),
+        "titles": ("feat:", "feat(", "feature:", "add:"),
+    },
+    "refactor": {
+        "labels": {"refactor", "cleanup", "tech-debt"},
+        "branches": ("refactor/", "cleanup/", "tech-debt/"),
+        "titles": ("refactor:", "refactor(", "cleanup:"),
+    },
+    "docs": {
+        "labels": {"docs", "documentation"},
+        "branches": ("docs/", "doc/"),
+        "titles": ("docs:", "doc:"),
+    },
+    "chore": {
+        "labels": {"chore", "ci", "dependencies", "deps"},
+        "branches": ("chore/", "ci/", "deps/", "dependabot/", "renovate/"),
+        "titles": ("chore:", "chore(", "ci:", "ci(", "build:", "build("),
+    },
+}
+
+TYPE_PRIORITY = {
+    "bug-fix": 0,
+    "feature": 1,
+    "unknown": 2,
+    "refactor": 3,
+    "chore": 4,
+    "docs": 5,
+}
 
 
 def parse_date(s):
@@ -32,8 +69,53 @@ def parse_date(s):
         return None
 
 
+# -- PR type classification --
 
-# ── Blocker checks ───────────────────────────────────────────────────────────
+
+def classify_pr_type(title, branch, labels, diff_files=None):
+    """Classify a PR by type based on available signals."""
+    label_names = {lb.lower() for lb in labels}
+    branch_lower = (branch or "").lower()
+    title_lower = (title or "").lower().strip()
+
+    for pr_type, signals in TYPE_SIGNALS.items():
+        if label_names & signals["labels"]:
+            return pr_type
+
+    for pr_type, signals in TYPE_SIGNALS.items():
+        if any(branch_lower.startswith(p) for p in signals["branches"]):
+            return pr_type
+
+    for pr_type, signals in TYPE_SIGNALS.items():
+        if any(title_lower.startswith(p) for p in signals["titles"]):
+            return pr_type
+
+    # Heuristic: if diff is available, check file types
+    if diff_files:
+        filenames = [df.get("filename", "") for df in diff_files]
+        md_count = sum(1 for f in filenames if f.endswith(".md"))
+        ci_count = sum(
+            1
+            for f in filenames
+            if ".github/" in f
+            or f.endswith((".yml", ".yaml"))
+            or f in ("Makefile", "Dockerfile", ".dockerignore", ".gitignore")
+        )
+
+        if md_count == len(filenames) and len(filenames) > 0:
+            return "docs"
+        if ci_count == len(filenames) and len(filenames) > 0:
+            return "chore"
+
+    # Check title keywords as last resort
+    if title_lower:
+        if any(w in title_lower for w in ("fix ", "fixed ", "fixes ", "bug")):
+            return "bug-fix"
+
+    return "unknown"
+
+
+# -- Blocker checks --
 
 
 def check_ci(check_runs, status_rollup):
@@ -54,7 +136,6 @@ def check_ci(check_runs, status_rollup):
                 detail += f" (+{extra} more)"
             return "FAIL", f"Failing: {detail}"
 
-        # Check for in-progress runs (not yet completed)
         in_progress = [
             cr
             for cr in check_runs
@@ -66,7 +147,6 @@ def check_ci(check_runs, status_rollup):
 
         return "pass", "\u2014"
 
-    # Fallback to statusCheckRollup
     if status_rollup:
         failing = [
             s
@@ -76,7 +156,9 @@ def check_ci(check_runs, status_rollup):
             or s.get("state", "").upper() in ("FAILURE", "ERROR")
         ]
         if failing:
-            names = [s.get("name", "") or s.get("context", "unknown") for s in failing[:3]]
+            names = [
+                s.get("name", "") or s.get("context", "unknown") for s in failing[:3]
+            ]
             extra = len(failing) - 3
             detail = ", ".join(names)
             if extra > 0:
@@ -99,24 +181,23 @@ def check_conflicts(mergeable):
         return "pass", "\u2014"
     elif mergeable == "CONFLICTING":
         return "FAIL", "Has merge conflicts"
+    elif mergeable == "UNKNOWN":
+        return "warn", "Merge status not yet computed"
     else:
         return "FAIL", f"Conflict status: {mergeable or 'unknown'}"
 
 
 def check_reviews(reviews, review_comments, pr_comments, fetch_ok=True):
-    """Handle deterministic review checks only. Comment evaluation is the agent's job.
+    """Handle deterministic review checks only. Comment evaluation is the sub-agent's job.
 
     Returns (status, detail, has_comments).
-    - status/detail cover only CHANGES_REQUESTED and inline threads.
-    - has_comments indicates whether the agent needs to evaluate comments.
     """
-    # If the fetch failed, we can't know if there are comments — flag for review
     if not fetch_ok:
-        return "needs_review", "PR data incomplete — fetch may have failed", True
+        return "FAIL", "PR data incomplete \u2014 fetch may have failed", True
 
     issues = []
 
-    # 1. Check for unresolved CHANGES_REQUESTED (handle DISMISSED)
+    # Check for unresolved CHANGES_REQUESTED
     user_states = {}
     for r in reviews:
         login = r.get("user", {}).get("login", "")
@@ -129,9 +210,11 @@ def check_reviews(reviews, review_comments, pr_comments, fetch_ok=True):
 
     unresolved = [u for u, s in user_states.items() if s == "CHANGES_REQUESTED"]
     if unresolved:
-        issues.append(f"CHANGES_REQUESTED from {', '.join('@' + u for u in unresolved)}")
+        issues.append(
+            f"CHANGES_REQUESTED from {', '.join('@' + u for u in unresolved)}"
+        )
 
-    # 2. Check inline review comments (count threads)
+    # Check inline review comments
     if review_comments:
         paths = set(c.get("path", "") for c in review_comments if c.get("path"))
         if paths:
@@ -139,14 +222,13 @@ def check_reviews(reviews, review_comments, pr_comments, fetch_ok=True):
                 f"{len(review_comments)} inline threads on {', '.join(list(paths)[:2])}"
             )
 
-    # 3. Check if there are any comments worth reviewing (don't extract them —
-    # the agent spawns a sub-agent that reads the full raw PR file directly)
+    # Check if there are any comments worth reviewing
     has_comments = bool(pr_comments) or any(r.get("body") for r in reviews)
 
     if issues:
         return "FAIL", "; ".join(issues), has_comments
     if has_comments:
-        return "needs_review", "Has comments — agent to evaluate", True
+        return "needs_review", "Has comments \u2014 sub-agent to evaluate", True
     return "pass", "\u2014", False
 
 
@@ -162,7 +244,6 @@ def check_jira(title, body, branch):
 
 
 def check_staleness(updated_at_str, now):
-    """Compute staleness signals for agent judgment. Returns (status, detail, staleness_data)."""
     if not updated_at_str:
         return "FAIL", "No updatedAt date found", {"days_old": None}
     updated = parse_date(updated_at_str)
@@ -170,22 +251,22 @@ def check_staleness(updated_at_str, now):
         return "FAIL", "Cannot parse date", {"days_old": None}
     days_old = (now - updated).days
     if days_old > 30:
-        return "FAIL", f"Last updated {updated.date()} \u2014 {days_old} days ago", {"days_old": days_old}
+        return (
+            "FAIL",
+            f"Last updated {updated.date()} \u2014 {days_old} days ago",
+            {"days_old": days_old},
+        )
     return "pass", "\u2014", {"days_old": days_old}
 
 
-# ── Superseded PR detection ─────────────────────────────────────────────────
+# -- Superseded PR detection --
 
 
 def detect_superseded(results, index_map):
-    """Detect PRs that may be superseded by newer PRs touching the same files."""
-    # Build a map of files touched by each PR (from index data)
     pr_files = {}
     for r in results:
         num = r["number"]
         idx = index_map.get(num, {})
-        # changedFiles count is in the index, but actual file list is in detail
-        # We'll use branch name similarity and title similarity as signals
         pr_files[num] = {
             "branch": r["branch"],
             "title": r["title"].lower(),
@@ -195,7 +276,7 @@ def detect_superseded(results, index_map):
             "changed_files": idx.get("changedFiles", 0),
         }
 
-    superseded = {}  # pr_number -> superseding pr_number
+    superseded = {}
 
     for r in results:
         num = r["number"]
@@ -207,11 +288,9 @@ def detect_superseded(results, index_map):
                 continue
             other_info = pr_files[other_num]
 
-            # Skip if the other PR is older
             if other_info["created"] <= info["created"]:
                 continue
 
-            # Check if branches suggest supersession (e.g., feat/foo-v2 supersedes feat/foo)
             if (
                 info["branch"]
                 and other_info["branch"]
@@ -221,7 +300,6 @@ def detect_superseded(results, index_map):
                 superseded[num] = other_num
                 break
 
-            # Check if titles are very similar (edit distance proxy: one contains the other)
             if (
                 len(info["title"]) > 15
                 and len(other_info["title"]) > 15
@@ -237,11 +315,10 @@ def detect_superseded(results, index_map):
     return superseded
 
 
-# ── Diff hunk overlap analysis ───────────────────────────────────────────────
+# -- Diff hunk overlap analysis --
 
 
 def parse_hunks(patch):
-    """Parse hunk headers from a unified diff patch string."""
     if not patch:
         return []
     hunks = []
@@ -257,7 +334,6 @@ def hunks_overlap(h1, h2):
 
 
 def compute_overlaps(pr_file_hunks):
-    """Find line-level overlaps between all pairs of mergeable PRs."""
     nums = sorted(pr_file_hunks.keys())
     overlaps = []
     shared_no_overlap = []
@@ -295,11 +371,11 @@ def compute_overlaps(pr_file_hunks):
     return overlaps, shared_no_overlap
 
 
-# ── Merge order computation ──────────────────────────────────────────────────
+# -- Review order computation --
 
 
-def compute_merge_order(results, overlaps, pr_file_hunks):
-    """Compute a recommended merge sequence for clean, mergeable PRs."""
+def compute_review_order(results, overlaps, pr_file_hunks):
+    """Compute a recommended review/merge sequence for clean, mergeable PRs."""
     clean_mergeable = [
         r["number"]
         for r in results
@@ -309,7 +385,6 @@ def compute_merge_order(results, overlaps, pr_file_hunks):
     if not clean_mergeable:
         return []
 
-    # Build overlap graph: edges between PRs that overlap
     overlap_graph = defaultdict(set)
     for o in overlaps:
         if o["pr_a"] in clean_mergeable and o["pr_b"] in clean_mergeable:
@@ -320,11 +395,11 @@ def compute_merge_order(results, overlaps, pr_file_hunks):
     ordered = []
     remaining = set(clean_mergeable)
 
-    # Greedy: pick PR with fewest overlap partners, priority labels first, smallest size
     while remaining:
         best = min(
             remaining,
             key=lambda n: (
+                TYPE_PRIORITY.get(pr_map[n]["pr_type"], 99),
                 len(overlap_graph.get(n, set()) & remaining),
                 0 if pr_map[n]["has_priority"] else 1,
                 pr_map[n]["size_score"],
@@ -336,11 +411,73 @@ def compute_merge_order(results, overlaps, pr_file_hunks):
     return ordered
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# -- Unified comment stream extraction --
+
+
+def merge_comment_sources(pr_comments, reviews, review_comments):
+    """Merge all comment sources into a single chronological list.
+
+    This is the shared implementation — pr-fixer/scripts/merge-comments.py
+    has an identical copy for CLI use. Keep them in sync.
+    """
+    all_comments = []
+
+    for c in pr_comments:
+        all_comments.append(
+            {
+                "source": "pr_comment",
+                "author": c.get("author", {}).get("login", ""),
+                "timestamp": c.get("createdAt", ""),
+                "body": c.get("body", ""),
+            }
+        )
+
+    for r in reviews:
+        body = r.get("body", "")
+        if not body or not body.strip():
+            continue
+        all_comments.append(
+            {
+                "source": "review",
+                "author": r.get("user", {}).get("login", ""),
+                "state": r.get("state", ""),
+                "timestamp": r.get("submitted_at", ""),
+                "body": body,
+            }
+        )
+
+    for rc in review_comments:
+        body = rc.get("body", "")
+        if not body or not body.strip():
+            continue
+        all_comments.append(
+            {
+                "source": "inline_comment",
+                "author": rc.get("user", {}).get("login", ""),
+                "path": rc.get("path", ""),
+                "timestamp": rc.get("created_at", ""),
+                "body": body,
+            }
+        )
+
+    all_comments.sort(key=lambda c: c.get("timestamp", ""))
+    return all_comments
+
+
+def extract_unified_comments(pr_data):
+    """Extract and merge all comments from a PR data dict."""
+    return merge_comment_sources(
+        pr_data.get("pr", {}).get("comments", []),
+        pr_data.get("reviews", []),
+        pr_data.get("review_comments", []),
+    )
+
+
+# -- Main --
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Analyze PRs for merge readiness")
+    parser = argparse.ArgumentParser(description="Analyze PRs for review readiness")
     parser.add_argument(
         "--output-dir",
         default="artifacts/pr-review",
@@ -351,26 +488,26 @@ def main():
     output_dir = args.output_dir
     now = datetime.now(timezone.utc)
 
-    # Load index
     with open(os.path.join(output_dir, "index.json")) as f:
         index = json.load(f)
     index_map = {pr["number"]: pr for pr in index}
 
-    # Analyze each PR
     results = []
-    pr_file_hunks = {}  # for overlap analysis
+    pr_file_hunks = {}
+    pr_data_cache = {}  # stash pr_data for needs_review PRs to avoid re-reading
 
     for idx_pr in index:
         num = idx_pr["number"]
         pr_file = os.path.join(output_dir, "prs", f"{num}.json")
 
-        # Load detailed data
         pr_data = {}
         fetch_ok = False
-        if os.path.exists(pr_file) and os.path.getsize(pr_file) > 10:
+        try:
             with open(pr_file) as f:
                 pr_data = json.load(f)
             fetch_ok = bool(pr_data.get("pr"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
 
         pr = pr_data.get("pr", {})
         reviews = pr_data.get("reviews", [])
@@ -378,7 +515,6 @@ def main():
         check_runs = pr_data.get("check_runs", [])
         diff_files = pr_data.get("diff_files", [])
 
-        # Use index as fallback for fields missing in detail
         title = pr.get("title") or idx_pr.get("title", "")
         author = (pr.get("author") or idx_pr.get("author", {})).get("login", "unknown")
         is_draft = pr.get("isDraft", idx_pr.get("isDraft", False))
@@ -391,38 +527,50 @@ def main():
         additions = pr.get("additions", idx_pr.get("additions", 0)) or 0
         deletions = pr.get("deletions", idx_pr.get("deletions", 0)) or 0
         changed_files = pr.get("changedFiles", idx_pr.get("changedFiles", 0)) or 0
-        labels = [lb.get("name", "") for lb in (pr.get("labels") or idx_pr.get("labels", []))]
-        is_fork = pr.get("isCrossRepository", idx_pr.get("isCrossRepository", False))
-        fork_owner = (pr.get("headRepositoryOwner") or idx_pr.get("headRepositoryOwner") or {}).get("login", "")
+        labels = [
+            lb.get("name", "") for lb in (pr.get("labels") or idx_pr.get("labels", []))
+        ]
+        is_fork = pr.get(
+            "isCrossRepository", idx_pr.get("isCrossRepository", False)
+        )
+        fork_owner = (
+            pr.get("headRepositoryOwner")
+            or idx_pr.get("headRepositoryOwner")
+            or {}
+        ).get("login", "")
         milestone = pr.get("milestone")
         milestone_title = milestone.get("title", "") if milestone else ""
         pr_comments = pr.get("comments", [])
         status_rollup = pr.get("statusCheckRollup", [])
 
+        # Classify PR type
+        pr_type = classify_pr_type(title, branch, labels, diff_files)
+
         # Run blocker checks
         ci_status, ci_detail = check_ci(check_runs, status_rollup)
         conflict_status, conflict_detail = check_conflicts(mergeable)
-        review_status, review_detail, has_comments = check_reviews(reviews, review_comments, pr_comments, fetch_ok)
+        review_status, review_detail, has_comments = check_reviews(
+            reviews, review_comments, pr_comments, fetch_ok
+        )
+        if review_status == "needs_review":
+            pr_data_cache[num] = pr_data
         jira_status, jira_detail = check_jira(title, body, branch)
         stale_status, stale_detail, staleness_data = check_staleness(updated_at, now)
 
-        # Count FAILs (warn doesn't count)
         fail_count = sum(
             1
             for s in [ci_status, conflict_status, review_status, stale_status]
             if s == "FAIL"
         )
 
-        # Priority labels
         has_priority = any(
-            lb in ("priority/critical", "bug", "hotfix", "priority/high") for lb in labels
+            lb in ("priority/critical", "bug", "hotfix", "priority/high")
+            for lb in labels
         )
 
-        # Size score (for ranking)
         size_score = additions + deletions + changed_files * 10
         size_str = f"{changed_files} files (+{additions}/-{deletions})"
 
-        # Build file hunks for overlap analysis
         if not is_draft and mergeable == "MERGEABLE" and diff_files:
             file_hunks = {}
             for df in diff_files:
@@ -437,13 +585,14 @@ def main():
         results.append(
             {
                 "number": num,
-                "rank": 0,  # set after sorting
+                "rank": 0,
                 "title": title,
                 "url": url,
                 "author": author,
                 "isDraft": is_draft,
                 "is_fork": is_fork,
                 "fork_owner": fork_owner,
+                "pr_type": pr_type,
                 "size": size_str,
                 "size_score": size_score,
                 "updatedAt": updated_at[:10] if updated_at else "",
@@ -527,7 +676,16 @@ def main():
             r["overlap_status"] = "pass"
             r["overlap_detail"] = "\u2014"
 
-    # Flag PRs to recommend closing (for agent to review)
+    # Recompute fail_count now that overlap_status is set
+    for r in results:
+        r["fail_count"] = sum(
+            1
+            for s in [r["ci_status"], r["conflict_status"], r["review_status"],
+                       r["stale_status"], r["overlap_status"]]
+            if s == "FAIL"
+        )
+
+    # Flag PRs to recommend closing
     for r in results:
         reasons = []
         days = r["days_since_update"]
@@ -543,10 +701,11 @@ def main():
             r["recommend_close"] = True
             r["recommend_close_reason"] = "; ".join(reasons)
 
-    # Rank PRs
+    # Rank PRs: type priority, then blocker count, then priority labels, then size
     results.sort(
         key=lambda r: (
             1 if r["isDraft"] else 0,
+            TYPE_PRIORITY.get(r["pr_type"], 99),
             r["fail_count"],
             0 if r["has_priority"] else 1,
             r["size_score"],
@@ -555,8 +714,8 @@ def main():
     for i, r in enumerate(results):
         r["rank"] = i + 1
 
-    # Compute merge order for clean PRs
-    merge_order = compute_merge_order(results, overlaps, pr_file_hunks)
+    # Compute review order for clean PRs
+    review_order = compute_review_order(results, overlaps, pr_file_hunks)
 
     # Stats
     non_draft = [r for r in results if not r["isDraft"]]
@@ -568,13 +727,18 @@ def main():
         "needs_work": sum(1 for r in non_draft if r["fail_count"] >= 2),
         "recommend_close": sum(1 for r in results if r["recommend_close"]),
         "fork_prs": sum(1 for r in results if r["is_fork"]),
-        "fork_prs_count": sum(1 for r in results if r["is_fork"]),
+        "by_type": {},
     }
 
-    # ── Collect PRs needing agent review ────────────────────────────────────
+    # Type breakdown
+    for r in results:
+        t = r["pr_type"]
+        stats["by_type"][t] = stats["by_type"].get(t, 0) + 1
+
+    # Collect PRs needing sub-agent review
     needs_review_nums = [r["number"] for r in results if r["review_status"] == "needs_review"]
 
-    # ── Write per-PR analysis files ───────────────────────────────────────
+    # Write per-PR analysis files
     analysis_dir = os.path.join(output_dir, "analysis")
     os.makedirs(analysis_dir, exist_ok=True)
 
@@ -583,55 +747,19 @@ def main():
         with open(pr_path, "w") as f:
             json.dump(r, f, indent=2, ensure_ascii=False)
 
-    # ── Write per-comment review files for needs_review PRs ───────────────
-    # Raw prs/{number}.json can be 50-80KB (diffs, patches, full body) which
-    # exceeds the Read tool's output limit. Instead, extract each comment into
-    # its own small file so the sub-agent can read them one at a time, newest
-    # first, and stop as soon as it finds the latest bot review.
+    # Write unified comment stream per PR
     reviews_dir = os.path.join(output_dir, "reviews")
 
     for num in needs_review_nums:
         pr_reviews_dir = os.path.join(reviews_dir, str(num))
         os.makedirs(pr_reviews_dir, exist_ok=True)
 
-        raw_path = os.path.join(output_dir, "prs", f"{num}.json")
-        if not os.path.exists(raw_path):
+        raw = pr_data_cache.get(num, {})
+        if not raw:
             continue
-        with open(raw_path) as f:
-            raw = json.load(f)
 
+        all_comments = extract_unified_comments(raw)
         pr = raw.get("pr", {})
-        all_comments = []
-
-        # PR comments (includes bot reviews)
-        for c in pr.get("comments", []):
-            all_comments.append({
-                "source": "pr_comment",
-                "author": c.get("author", {}).get("login", ""),
-                "body": c.get("body", ""),
-            })
-
-        # Formal reviews with body content
-        for r_item in raw.get("reviews", []):
-            body = r_item.get("body", "")
-            if body and body.strip():
-                all_comments.append({
-                    "source": "review",
-                    "author": r_item.get("user", {}).get("login", ""),
-                    "state": r_item.get("state", ""),
-                    "body": body,
-                })
-
-        # Inline review comments
-        for rc in raw.get("review_comments", []):
-            body = rc.get("body", "")
-            if body and body.strip():
-                all_comments.append({
-                    "source": "inline_comment",
-                    "author": rc.get("user", {}).get("login", ""),
-                    "path": rc.get("path", ""),
-                    "body": body,
-                })
 
         # Write meta file
         meta = {
@@ -643,31 +771,34 @@ def main():
         with open(os.path.join(pr_reviews_dir, "meta.json"), "w") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
 
-        # Write each comment as a numbered file (01.json, 02.json, ...)
+        # Write each comment as a numbered file, chronological order
         for i, comment in enumerate(all_comments, 1):
             comment_path = os.path.join(pr_reviews_dir, f"{i:02d}.json")
             with open(comment_path, "w") as f:
                 json.dump(comment, f, indent=2, ensure_ascii=False)
 
-    # ── Write compact summary (no per-PR details — just the index) ────────
+    # Write compact summary
     pr_index = []
     for r in results:
-        pr_index.append({
-            "number": r["number"],
-            "rank": r["rank"],
-            "title": r["title"],
-            "author": r["author"],
-            "isDraft": r["isDraft"],
-            "fail_count": r["fail_count"],
-            "review_status": r["review_status"],
-            "recommend_close": r["recommend_close"],
-            "is_fork": r["is_fork"],
-        })
+        pr_index.append(
+            {
+                "number": r["number"],
+                "rank": r["rank"],
+                "title": r["title"],
+                "author": r["author"],
+                "isDraft": r["isDraft"],
+                "pr_type": r["pr_type"],
+                "fail_count": r["fail_count"],
+                "review_status": r["review_status"],
+                "recommend_close": r["recommend_close"],
+                "is_fork": r["is_fork"],
+            }
+        )
 
     summary = {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%S UTC"),
         "stats": stats,
-        "merge_order": merge_order,
+        "review_order": review_order,
         "needs_review": needs_review_nums,
         "pr_index": pr_index,
         "overlaps": overlaps,
@@ -678,17 +809,26 @@ def main():
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
 
-    print(f"Analysis complete:")
+    print("Analysis complete:")
     print(f"  Summary: {summary_path}")
     print(f"  Per-PR:  {analysis_dir}/{{number}}.json")
     print(f"  Reviews: {reviews_dir}/{{number}}/meta.json + 01.json, 02.json, ...")
     print(f"  Total: {stats['total']} PRs ({stats['drafts']} drafts)")
-    print(f"  Clean: {stats['clean']} | One blocker: {stats['one_blocker']} | Needs work: {stats['needs_work']}")
+    print(
+        f"  Clean: {stats['clean']} | One blocker: {stats['one_blocker']} | Needs work: {stats['needs_work']}"
+    )
     print(f"  Recommend closing: {stats['recommend_close']}")
-    print(f"  Needs agent review: {len(needs_review_nums)} PRs — {needs_review_nums}")
-    print(f"  Overlaps: {len(overlaps)} line-level, {len(shared_no_overlap)} shared-file-only")
-    if merge_order:
-        print(f"  Merge order: {' → '.join(f'#{n}' for n in merge_order[:10])}")
+    print(f"  Type breakdown: {stats['by_type']}")
+    print(
+        f"  Needs sub-agent review: {len(needs_review_nums)} PRs \u2014 {needs_review_nums}"
+    )
+    print(
+        f"  Overlaps: {len(overlaps)} line-level, {len(shared_no_overlap)} shared-file-only"
+    )
+    if review_order:
+        print(
+            f"  Review order: {' \u2192 '.join(f'#{n}' for n in review_order[:10])}"
+        )
 
 
 if __name__ == "__main__":
