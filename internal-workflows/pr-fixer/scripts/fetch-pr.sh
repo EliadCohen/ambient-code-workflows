@@ -121,6 +121,24 @@ python3 "${SCRIPT_DIR}/merge-comments.py" \
     --review-comments "${TMPDIR}/review_comments.json" \
     --output "${OUTPUT_DIR}/comments.json"
 
+# -- Generate per-file diffs and index (for large diffs) --
+echo "  Splitting diff into per-file diffs..." >&2
+mkdir -p "${OUTPUT_DIR}/diffs"
+jq -r '.[] | "\(.status)\t\(.additions)\t\(.deletions)\t\(.filename)"' \
+    "${OUTPUT_DIR}/diff.json" 2>/dev/null > "${OUTPUT_DIR}/diff-index.txt" || true
+
+# Write each file's diff as a separate JSON file (filename sanitized to path-safe name)
+python3 -c "
+import json, os, re
+with open('${OUTPUT_DIR}/diff.json') as f:
+    files = json.load(f)
+for df in files:
+    fname = df.get('filename', 'unknown')
+    safe = re.sub(r'[^a-zA-Z0-9._-]', '_', fname)
+    with open(os.path.join('${OUTPUT_DIR}/diffs', safe + '.json'), 'w') as out:
+        json.dump(df, out, indent=2)
+" 2>/dev/null || true
+
 # -- Summary --
 COMMENT_COUNT=$(jq 'length' "${OUTPUT_DIR}/comments.json" 2>/dev/null || echo "0")
 DIFF_COUNT=$(jq 'length' "${OUTPUT_DIR}/diff.json" 2>/dev/null || echo "0")
@@ -130,7 +148,7 @@ MERGEABLE=$(jq -r '.mergeable // "unknown"' "${OUTPUT_DIR}/pr.json" 2>/dev/null 
 echo ""
 echo "Fetch complete for PR #${PR_NUM}:"
 echo "  Mergeable: ${MERGEABLE}"
-echo "  Comments:  ${COMMENT_COUNT} (unified stream)"
-echo "  Diff files: ${DIFF_COUNT}"
+echo "  Comments:  ${COMMENT_COUNT} (unified stream + per-comment files)"
+echo "  Diff files: ${DIFF_COUNT} (index: diff-index.txt)"
 echo "  CI checks: ${CI_COUNT}"
 echo "  Output:    ${OUTPUT_DIR}/"

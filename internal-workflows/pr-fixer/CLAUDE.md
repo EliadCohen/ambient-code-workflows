@@ -36,18 +36,25 @@ Run the fetch script to collect all data for the PR:
 
 This produces:
 
+- `artifacts/pr-fixer/{number}/summary.md` — **read this first** — compact overview with mergeable status, CI summary, comment counts, and author breakdown
 - `artifacts/pr-fixer/{number}/pr.json` — PR metadata (title, body, labels, branch, mergeable status, etc.)
-- `artifacts/pr-fixer/{number}/comments.json` — unified chronological comment stream (all reviews, inline comments, and discussion merged together)
-- `artifacts/pr-fixer/{number}/diff.json` — diff files with patches
+- `artifacts/pr-fixer/{number}/comments.json` — unified chronological comment stream (all comments merged — may be large)
+- `artifacts/pr-fixer/{number}/comments/01.json`, `02.json`, ... — **individual comment files** (read these instead of the full `comments.json` to stay under token limits)
+- `artifacts/pr-fixer/{number}/diff-index.txt` — **tab-separated file listing** (status, additions, deletions, filename) — read this to see what files changed
+- `artifacts/pr-fixer/{number}/diffs/{filename}.json` — **per-file diff** with patch — read individual files as needed
+- `artifacts/pr-fixer/{number}/diff.json` — all diffs in one array (**do not read directly** — may exceed token limits)
 - `artifacts/pr-fixer/{number}/ci.json` — check run results
 
 ### Phase 2: Assess PR State
 
-Read the fetched data to build a picture of what needs fixing. Check:
+**Start by reading `summary.md`** — it gives you the full picture in ~20 lines: mergeable status, CI failures, comment counts, who commented.
 
-1. **Merge conflicts** — is `mergeable` set to `CONFLICTING`? If so, rebase is needed first.
-2. **CI status** — are any checks failing? Note which ones.
-3. **Review comments** — read `comments.json` to understand the full conversation.
+Then drill into details only as needed:
+
+1. **Merge conflicts** — summary.md shows mergeable status. If `CONFLICTING`, rebase is needed first.
+2. **CI status** — summary.md lists failing checks. Read `ci.json` only if you need the full check run details.
+3. **Review comments** — summary.md shows counts and authors. Read individual comment files (`comments/01.json`, `02.json`, etc.) **newest first** — start from the highest number. Don't read `comments.json` directly (it may exceed token limits).
+4. **Diff** — read `diff-index.txt` to see all changed files. Then read individual file diffs from `diffs/{filename}.json` as needed. **Never read `diff.json` directly** — it may exceed token limits.
 
 Determine the fix order:
 1. Rebase first (if conflicts exist) — everything else depends on a clean base
@@ -87,7 +94,7 @@ After rebase:
 
 ### Phase 4: Evaluate Reviewer Comments
 
-Read `comments.json` — this is a chronological stream of all comments on the PR. Each comment has:
+Read the individual comment files in `comments/` **newest first** (highest number first). Each comment file has:
 
 ```json
 {
@@ -129,9 +136,18 @@ For each valid issue identified in Phase 4:
 4. Commit with a clear message explaining what was fixed and why
 
 **Commit style:**
-- One commit per logical fix (don't squash everything into one commit)
-- Message format: `fix: address review feedback — <what was fixed>`
-- If fixing a specific reviewer's comment, mention it: `fix: handle nil error case (per @reviewer)`
+- Make all fixes as unstaged changes — do NOT commit as you go
+- After all fixes and lint/test passes, create a **single commit** with all changes
+- Set the commit author to the bot identity:
+  ```bash
+  git add -A
+  git commit --author="ambient-code[bot] <ambient-code[bot]@users.noreply.github.com>" \
+    -m "fix: address review feedback
+
+  <bullet list of what was fixed>
+
+  Co-Authored-By: Claude <noreply@anthropic.com>"
+  ```
 
 ### Phase 6: Respond to Invalid Concerns
 
@@ -176,22 +192,17 @@ After all code changes, verify everything is clean:
    - Fix failures caused by your changes
    - For pre-existing failures, note them in the fix report
 
-4. **Commit lint/test fixes** — `fix: resolve lint issues` or `fix: update tests for rebase changes`
+4. **Do NOT commit yet** — lint/test fixes are included in the single final commit with all other changes
 
 ### Phase 8: Push
 
-Once all fixes are committed and lints/tests pass:
+Once all fixes are in a single commit and lints/tests pass, push immediately — **do not ask for confirmation**:
 
 ```bash
 git push --force-with-lease origin HEAD
 ```
 
 Use `--force-with-lease` (not `--force`) to avoid overwriting changes someone else may have pushed.
-
-**Important:** Ask the user for confirmation before pushing. Show them:
-- The list of commits being pushed
-- A summary of changes made
-- Any concerns about the fixes
 
 ### Phase 9: Post Fix Report as PR Comment
 
@@ -237,10 +248,8 @@ Comment format:
 **Lints & Tests**
 - [All passing / Fixed N lint issues / Tests status]
 
-#### Commits Pushed
-- `abc1234` fix: resolve merge conflicts with main
-- `def5678` fix: handle nil error case (per @reviewer)
-- `ghi9012` fix: resolve lint issues
+#### Commit
+- `abc1234` fix: address review feedback
 
 <!-- pr-fixer-bot -->
 ```
@@ -248,7 +257,7 @@ Comment format:
 ## Important Notes
 
 - **Never force push without `--force-with-lease`** — it protects against overwriting others' work
-- **Always ask before pushing** — show the user what will be pushed
+- **Push automatically** — do not ask for confirmation, the workflow is designed to run unattended
+- **Single commit** — all fixes go in one commit authored by `ambient-code[bot]`
 - **Preserve the PR author's intent** — when resolving conflicts, keep the PR's changes where they make sense
 - **Don't over-fix** — only address issues that were actually raised. Don't refactor surrounding code or add improvements the reviewer didn't ask for.
-- **Be transparent** — if you're unsure about a fix, note it in the report and let the user decide
