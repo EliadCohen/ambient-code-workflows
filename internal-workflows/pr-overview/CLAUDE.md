@@ -74,16 +74,40 @@ Find or create **"Review Queue"** milestone (also check for "Merge Queue"). Add 
 
 ## Blocker Comments
 
-Post **after sub-agent evaluation is complete**. For each PR:
+Post **after sub-agent evaluation is complete**. Skip drafts, recommend-close PRs, and PRs unchanged since last comment.
 
-1. Start with the `analysis.json` blocker statuses (ci_status, conflict_status, etc.)
-2. Update `review_status` based on the sub-agent verdict — if the verdict is `blocked`, set review_status to FAIL
-3. Recount fail_count with the updated statuses
-4. Post on PRs with `fail_count > 0` using `<!-- review-queue-bot -->` marker
+Use `<!-- review-queue-bot -->` marker. Delete old comment before posting new one.
 
-Include a blocker table and an "Action needed" line from the sub-agent verdict. Skip if unchanged since last comment. Skip drafts and recommend-close PRs.
+**Do NOT use a rigid blocker table.** Write a natural language comment that's actually helpful to the PR author. Use the analysis data and sub-agent verdict to write 2-4 sentences covering:
 
-Note: `review_status = "needs_review"` in `analysis.json` means the sub-agent hasn't evaluated yet — it is NOT a clean pass. Always evaluate these PRs before deciding if they're clean.
+- What's blocking this PR specifically (not just "CI FAIL" — say which check failed and why if you know)
+- What the author needs to do to unblock it
+- Any context from the review conversation that's relevant
+
+Example of a **good** blocker comment:
+
+```markdown
+### Review Queue — Not Ready to Merge
+
+CI is failing on the `e2e` check — looks like the session cleanup test is timing out after your changes to the runner lifecycle. You also have merge conflicts with main on `components/backend/main.go` (likely from #877 which merged yesterday).
+
+@bobbravo2 also requested changes on the error handling in `get_env()` — they want a fallback value instead of raising.
+
+**To unblock:** rebase onto main, fix the e2e timeout, and address Bob's review comment.
+
+<!-- review-queue-bot -->
+```
+
+Example of a **bad** blocker comment (don't do this):
+
+```markdown
+| Check | Status | Detail |
+|-------|--------|--------|
+| CI | FAIL | --- |
+| Merge conflicts | FAIL | --- |
+```
+
+Note: `review_status = "needs_review"` in `analysis.json` means the sub-agent hasn't evaluated yet — it is NOT a clean pass. Always evaluate before deciding if a PR is clean.
 
 ## Report
 
