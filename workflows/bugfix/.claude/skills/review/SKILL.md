@@ -159,9 +159,17 @@ Be direct. Don't hedge with "everything looks great but maybe consider..."
 when there's an actual problem. If the fix is broken, say so. If the tests
 are insufficient, say what's missing.
 
+### Step 6: Write the Review Artifact
+
+Save your verdict and findings to `artifacts/bugfix/review/verdict.md` so that
+subsequent phases (and speedrun resumption) can detect that this phase is
+complete. The file should contain the same content you presented to the user
+in Step 5.
+
 ## Output
 
-- Review findings reported directly to the user (inline, not a file)
+- Review findings reported directly to the user (inline)
+- Review saved to `artifacts/bugfix/review/verdict.md`
 - If issues are found, specific guidance on what to fix or test next
 
 ## Usage Examples

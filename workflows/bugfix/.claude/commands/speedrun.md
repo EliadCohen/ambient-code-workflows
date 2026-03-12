@@ -40,19 +40,19 @@ context, then pick the first phase that is NOT done.
 
 | Phase | Skill | "Done" signal |
 | ------- | ------- | --------------- |
-| assess | `.claude/skills/assess/SKILL.md` | Conversation contains a bug assessment (summary, gaps, plan) |
+| assess | `.claude/skills/assess/SKILL.md` | `artifacts/bugfix/reports/assessment.md` exists |
 | reproduce | `.claude/skills/reproduce/SKILL.md` | `artifacts/bugfix/reports/reproduction.md` exists |
 | diagnose | `.claude/skills/diagnose/SKILL.md` | `artifacts/bugfix/analysis/root-cause.md` exists |
 | fix | `.claude/skills/fix/SKILL.md` | `artifacts/bugfix/fixes/implementation-notes.md` exists |
 | test | `.claude/skills/test/SKILL.md` | `artifacts/bugfix/tests/verification.md` exists |
-| review | `.claude/skills/review/SKILL.md` | Always run once between test and document |
+| review | `.claude/skills/review/SKILL.md` | `artifacts/bugfix/review/verdict.md` exists |
 | document | `.claude/skills/document/SKILL.md` | `artifacts/bugfix/docs/pr-description.md` exists |
 | pr | `.claude/skills/pr/SKILL.md` | A PR URL has been shared in conversation |
 
 ### Rules
 
 - Check artifacts in order. The first phase whose signal is NOT satisfied is next.
-- If no artifacts exist and no assessment has been done, start at **assess**.
+- If no artifacts exist, start at **assess**.
 - If the user specifies a starting point in `$ARGUMENTS`, respect that.
 - If conversation context clearly establishes a phase was completed (even
   without an artifact), skip it.
