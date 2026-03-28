@@ -93,12 +93,20 @@ gh pr list --repo OWNER/REPO --state open --limit 30 --json number,title,headRef
 gh issue list --repo OWNER/REPO --state open --limit 30 --json number,title --jq '.[] | "\(.number)\t\(.title)"'
 ```
 
-If you find existing work that addresses this bug, note it in your assessment
-and present the user with options:
+If you find an open PR that appears to directly address this bug, **stop here
+and use `AskUserQuestion`** before continuing the assessment. Present the
+options:
 
-- "PR #N already addresses this — review it instead of starting fresh?"
-- "Issue #M looks like a duplicate — should we consolidate?"
-- "PR #N partially overlaps — should we build on it or start independently?"
+- "PR #N appears to address this bug — review it instead of starting fresh"
+- "PR #N is related but doesn't fully cover it — continue with assessment"
+- "Not sure if PR #N is relevant — continue with assessment"
+
+This gate applies in both normal and speedrun mode. Do not continue to Step 4
+until the user responds. The `AskUserQuestion` tool triggers platform
+notifications so the user knows you need their input.
+
+If duplicate or related issues are found (but no PR), note them in the
+assessment and continue — these inform the assessment but don't block it.
 
 If no existing work is found, note that and continue.
 
