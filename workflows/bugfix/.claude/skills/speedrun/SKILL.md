@@ -135,6 +135,9 @@ context, then pick the first phase that is NOT done.
 - The summary skill scans all artifacts and presents a synthesized overview.
   This is the last thing the user sees — it surfaces findings that might
   otherwise get buried in earlier artifacts.
+- Speedrun still MUST honor any `AskUserQuestion` hard gates from earlier
+  phases (e.g., the existing-PR decision in assess). Those gates block until
+  the user responds — do not skip or work around them.
 
 ## Completion Report (Early Stop Only)
 

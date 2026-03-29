@@ -55,6 +55,7 @@ These are determined during pre-flight checks. Record each value as you go.
 | `GH_USER` | Step 0: `gh api user` or `/installation/repositories` (for bots) | `jsmith` |
 | `UPSTREAM_OWNER/REPO` | Step 2c: `gh repo view --json nameWithOwner` | `acme/myproject` |
 | `DEFAULT_BRANCH` | Step 2c: detected from upstream repo | `main` / `dev` / `master` |
+| `UPSTREAM_REMOTE` | Step 2b: the git remote name pointing to the upstream org | `origin` / `upstream` |
 | `FORK_OWNER` | Step 3: owner portion of fork's `nameWithOwner`, or `GH_USER` if newly created | `jsmith` |
 | `FORK_REMOTE` | Step 4: the git remote name pointing to the fork | `fork` / `origin` |
 | `REPO` | The repository name (without owner) | `myproject` |
@@ -231,6 +232,7 @@ Pre-flight summary:
 | GH_USER              | ___                |
 | UPSTREAM_OWNER/REPO  | ___                |
 | DEFAULT_BRANCH       | ___                |
+| UPSTREAM_REMOTE      | ___                |
 | EXISTING_REMOTES     | ___                |
 | HAS_CHANGES          | yes / no           |
 | CURRENT_BRANCH       | ___                |
@@ -392,18 +394,23 @@ permission by design.
 **Detection:**
 
 ```bash
-# Fetch the fork to get its current state
+# Fetch both the fork and the upstream remote (identified in Step 2b)
 git fetch FORK_REMOTE
+git fetch UPSTREAM_REMOTE
 
-# Check for workflow file differences between fork/DEFAULT_BRANCH and local DEFAULT_BRANCH
-# (local DEFAULT_BRANCH should be synced with upstream)
-WORKFLOW_DIFF=$(git diff --name-only FORK_REMOTE/DEFAULT_BRANCH..DEFAULT_BRANCH -- .github/workflows/ 2>/dev/null)
+# Compare fork's DEFAULT_BRANCH against upstream's DEFAULT_BRANCH
+# (don't rely on the local branch — it may be stale)
+WORKFLOW_DIFF=$(git diff --name-only FORK_REMOTE/DEFAULT_BRANCH..UPSTREAM_REMOTE/DEFAULT_BRANCH -- .github/workflows/ 2>/dev/null)
 
 if [ -n "$WORKFLOW_DIFF" ]; then
   echo "Fork is out of sync with upstream (workflow files differ):"
   echo "$WORKFLOW_DIFF"
 fi
 ```
+
+`UPSTREAM_REMOTE` is whichever remote was identified as pointing to the
+upstream org in Step 2b (typically `origin` when origin is the upstream repo,
+or `upstream` if the user added it separately).
 
 **If workflow differences exist — attempt automated sync:**
 
@@ -440,10 +447,11 @@ gh api --method POST repos/FORK_OWNER/REPO/merge-upstream -f branch=DEFAULT_BRAN
 # Fetch the updated fork
 git fetch FORK_REMOTE
 
-# Rebase the feature branch onto the synced fork/DEFAULT_BRANCH
+# Update local DEFAULT_BRANCH before creating the feature branch
+git checkout DEFAULT_BRANCH
 git rebase FORK_REMOTE/DEFAULT_BRANCH
 
-# Continue to Step 5 (create branch)
+# Continue to Step 5 (create feature branch from updated DEFAULT_BRANCH)
 ```
 
 ### Step 5: Create a Branch

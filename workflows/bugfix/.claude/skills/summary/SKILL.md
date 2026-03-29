@@ -125,7 +125,7 @@ Save the summary to `artifacts/bugfix/summary.md`.
 - **Don't editorialize.** Report what the artifacts say. If the review flagged
   a concern, include it. Don't soften it or add your own interpretation.
 - **Keep it short.** The whole point is that nobody reads the full artifacts.
-  If your summary is more than ~40 lines of markdown, cut it down.
+  If your summary is more than ~40 lines of Markdown, cut it down.
 
 ## Output
 
