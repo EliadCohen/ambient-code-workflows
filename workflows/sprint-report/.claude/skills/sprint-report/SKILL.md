@@ -5,30 +5,164 @@ description: Generate a comprehensive sprint health report from Jira data (CSV o
 
 # Sprint Health Report
 
-You are generating a sprint health report. The user has already answered the
-intake questions from the startup prompt. Execute the full pipeline below in a
-**single pass** — do not stop between steps.
+You are generating a sprint health report. Follow the full pipeline below.
 
-## User Input
+**Reference files** (read when needed, not upfront):
 
-```text
-$ARGUMENTS
+- `references/jira-fields.md` — custom field IDs and discovery
+- `references/jira-query-patterns.md` — JQL patterns and data volume guidance
+
+## Step 0: Discovery & Proposal
+
+Before asking the user any questions, discover what you can automatically.
+
+### 0a. Interpret the User Request
+
+The user may provide any combination of: project key, component name, board
+name, team name, sprint name/number, or just a vague reference like "my
+sprint." Extract whatever identifiers are present.
+
+### 0b. Discover the Sprint (Jira MCP)
+
+If Jira MCP is available:
+
+1. **Find the board:**
+   - `jira_get_agile_boards(project_key=X)` or
+     `jira_get_agile_boards(board_name=X)`
+   - If the user provided a component name, search boards by the project
+     containing that component
+2. **Find the active sprint:**
+   - `jira_get_sprints_from_board(board_id=BOARD_ID, state="active")`
+   - If multiple active sprints: include all in proposal and ask which one
+   - If none: offer the most recently closed sprint
+3. **Preview the sprint:**
+   - Count items, count unique assignees, note sprint dates and goal
+
+### 0c. Propose a Plan
+
+Present a short proposal:
+
+```
+I found [Sprint Name] ([state], [start] – [end]).
+
+Proposed plan:
+- Analyze [N] items across [M] team members
+- [Include/Skip] historical comparison ([K] closed sprints available)
+- Generate HTML report for all audiences
+- Output to artifacts/sprint-report/
+
+Approve to proceed, or tell me what to change.
 ```
 
-Consider the user input before proceeding. It contains answers to the startup
-questions (data source, team, audience, format, assumptions).
+Set these defaults (user can override any of them):
+
+| Setting | Default | Override Example |
+| --- | --- | --- |
+| Output format | HTML (template exists) | "Make it Markdown" |
+| Audience | All | "Just for scrum master" |
+| Historical trends | Include if 3+ closed sprints available | "Skip trends" |
+| Sprint | Current active sprint | "Use Sprint 2 instead" |
+
+Wait for user approval before proceeding to Step 1.
+
+### 0d. CSV or Other Source
+
+If Jira MCP is not available, or the user provides a CSV:
+
+- Ask only what you cannot derive: data source path, team name, sprint dates
+- Still propose defaults for everything else
 
 ## Step 1: Ingest Data
 
-Parse the sprint data from whichever source the user provided:
+### 1a. Discover Custom Fields
 
-- **CSV export:** Read the uploaded file and parse rows
-- **Jira MCP:** Use `jira_search` with the sprint ID or board ID + sprint filter
-- **Other format:** Adapt to whatever the user described
+Read `references/jira-fields.md` for common field ID patterns. Then confirm
+the correct IDs for this instance:
 
-Extract these fields per issue: key, type, status, priority, assignee, story
-points, created date, resolved date, sprint field, acceptance criteria, flagged
-status, blockers.
+- Use `jira_search_fields` to search for "story point" and "sprint"
+- Or fetch a single issue with all fields and inspect the keys:
+  `jira_search("project = X ORDER BY created DESC", maxResults=1, fields="*all")`
+- Record the story points field ID and sprint field ID for subsequent queries
+
+### 1b. Query Sprint Issues
+
+Use an **explicit field list** — see `references/jira-query-patterns.md` for
+details.
+
+```
+jira_get_sprint_issues(
+    sprint_id=SPRINT_ID,
+    fields="summary,status,issuetype,priority,assignee,created,updated,resolutiondate,components,description,customfield_XXXXX,customfield_YYYYY"
+)
+```
+
+Replace `customfield_XXXXX` and `customfield_YYYYY` with the IDs found in 1a.
+
+**DO NOT use `fields=*all`** — this returns 100+ custom fields per issue and
+can produce 500k+ characters, exceeding tool output limits.
+
+### 1c. Handle Mixed Sprints
+
+If the query returns items from multiple sprints (carryover):
+
+- Filter to current sprint ID in post-processing
+- Record carryover items separately (count them as a metric)
+- Include carryover items in the appendix, clearly marked
+
+### 1d. CSV Ingestion
+
+Parse rows and map columns to the standard fields: key, type, status,
+priority, assignee, story points, created date, resolved date, sprint, AC.
+
+### 1e. Assess Data Quality
+
+After ingesting data, compute coverage:
+
+| Check | How to Measure |
+| --- | --- |
+| Story points | % of items with a non-null, non-zero points field |
+| Resolution dates | % of items with `resolutiondate` set |
+| Acceptance criteria | % of items with AC patterns in `description` |
+| Priority | % of items with priority set |
+| Assignee | % of items with an assignee |
+
+**Minimum requirements:**
+
+- Sprint has >0 items (if 0: stop and tell the user)
+- Sprint has valid start/end dates (if missing: warn but continue)
+
+**Set fallback metrics when data is sparse:**
+
+| Metric | Ideal | Fallback | Caveat to Display |
+| --- | --- | --- | --- |
+| Delivery Rate | Points completed / committed | Items completed / committed | "Item-based (no story points)" |
+| Velocity | Avg points per sprint | Avg items per sprint | "Item-based velocity" |
+| Cycle Time | Created → resolved (days) | Days in current status | "Estimated from status duration" |
+| Story Sizing | Point distribution | Item type distribution | "Cannot analyze sizing without estimates" |
+
+If 2+ critical gaps exist (no points + no priorities + no AC + <3 days
+elapsed), warn the user:
+
+> Data quality is low — the report will have limited insights. Proceed
+> anyway, or wait until items are estimated?
+
+If proceeding, add a prominent data quality callout at the top of the
+Executive Summary.
+
+### 1f. Historical Data (If Approved in Step 0)
+
+Query the last 3–5 closed sprints from the same board. For each, retrieve
+issues the same way as the active sprint and calculate: velocity, completion
+rate, carryover count. See `references/jira-query-patterns.md` for queries.
+
+If fewer than 3 closed sprints exist, skip trends and note it in the report.
+
+### 1g. Identify Team
+
+1. Extract unique assignees from sprint items
+2. Sort alphabetically by last name
+3. Format: "F. LastName" (e.g., "C. Zaccaria")
+4. If >10 members: show first 8 + "and N more"
 
 ## Step 2: Compute Metrics (All 8 Dimensions)
 
@@ -37,19 +171,49 @@ data is insufficient rather than omitting the dimension.
 
 | Dimension | Key Metrics |
 | --- | --- |
-| Commitment Reliability | delivery rate (points completed / committed), item completion rate |
-| Scope Stability | items added/removed mid-sprint, scope change percentage |
+| Commitment Reliability | delivery rate (points or items completed / committed), item completion rate |
+| Scope Stability | items added/removed mid-sprint, scope change %, sprint goal alignment |
 | Flow Efficiency | cycle time (created → resolved), WIP count, status distribution |
 | Story Sizing | point distribution, oversized items (>8 pts), unestimated items |
-| Work Distribution | load per assignee, concentration risk, unassigned items |
+| Work Distribution | load per assignee, concentration risk (>30% = flag), unassigned items |
 | Blocker Analysis | flagged items, blocking/blocked relationships, impediment duration |
 | Backlog Health | acceptance criteria coverage, priority distribution, definition of ready |
-| Delivery Predictability | carryover count, zombie items (>2 sprints), aging analysis |
+| Delivery Predictability | carryover count, zombie items (>60 days old), aging analysis |
+
+### Sprint Goal Alignment
+
+If the sprint goal is defined (non-empty):
+
+1. Classify each item as aligned/not-aligned based on whether its summary
+   relates to a keyword or theme in the goal
+2. Calculate alignment percentage
+3. If <50%: add observation — "Only X% of items align with stated sprint goal"
+4. If >80%: add positive signal
+
+### Positive Signal Detection
+
+Actively look for what is going well. Find at least 3 positive signals from:
+
+- High AC coverage (>70%)
+- Low never-started rate (<15%)
+- Even work distribution (no one >30% load)
+- No critical blockers
+- Sprint goal clearly defined
+- Items completed on time
+- Low carryover rate (<30%)
+- Good priority coverage (>70%)
+- WIP within limits (<team size)
+- Fast cycle time (<7 days avg)
+- No zombie items (all items <60 days old)
+- Good sprint goal alignment (>80%)
+
+If <3 found, list whatever exists and note "Limited positive signals this
+sprint — opportunity for improvement."
 
 ## Step 3: Detect Anti-Patterns
 
-Check for each of these evidence-based patterns. Only report patterns with
-supporting data — do not speculate.
+Check for each pattern. Only report patterns with supporting data — do not
+speculate.
 
 | Anti-Pattern | Trigger |
 | --- | --- |
@@ -57,10 +221,28 @@ supporting data — do not speculate.
 | Perpetual carryover | items spanning 3+ sprints |
 | Missing Definition of Ready | 0% acceptance criteria coverage |
 | Work concentration | one person assigned >30% of items |
-| Mid-sprint scope injection | items added without descoping |
-| Zombie items | >60 days old, still open |
-| Item repurposing | summary/description changed mid-sprint |
-| Hidden work | items with no status transitions |
+| Mid-sprint scope injection | items added after sprint start without descoping |
+| Zombie items | any open item >60 days old |
+| Item repurposing | summary/description changed mid-sprint (requires changelog) |
+| Hidden work | items with no status transitions since added (requires changelog) |
+
+### Systematic Zombie Detection
+
+Do not just find the oldest item. Check **every** open item:
+
+1. Calculate `age = today − created_date` for all open items
+2. Filter where `age > 60 days`
+3. If count > 0: list ALL zombie items with key and age
+4. If count == 0: record as positive signal
+
+### Review Bottleneck Check
+
+If >40% of items are in a "Review"-like status:
+
+- Flag as flow bottleneck
+- Note that "Review" can mean code review, QA, or stakeholder approval
+- Recommend the team investigate which type dominates and consider splitting
+  the status for visibility
 
 ## Step 4: Generate Health Rating
 
@@ -76,6 +258,9 @@ Compute a risk score on a 0–10 scale:
 
 **Rating bands:** 0–3 = HEALTHY, 4–6 = MODERATE RISK, 7–10 = HIGH RISK
 
+If using fallback metrics (item-based instead of points-based), note the
+reduced confidence in the rating.
+
 ## Step 5: Produce the Report
 
 Generate artifacts in `artifacts/sprint-report/`:
@@ -83,13 +268,14 @@ Generate artifacts in `artifacts/sprint-report/`:
 - `{SprintName}_Health_Report.md` — full Markdown report
 - `{SprintName}_Health_Report.html` — styled HTML with KPI cards, progress bars, coaching notes
 
-Use whichever format(s) the user requested. If they said "both," produce both.
+Use whichever format(s) the user approved in Step 0. If they said "both,"
+produce both.
 
 ### Report Structure
 
 Every report follows this structure regardless of format:
 
-1. **Executive Summary** — health rating, top 5 numbers, positive signals
+1. **Executive Summary** — health rating, top 5 numbers, positive signals (minimum 3), data quality note (if applicable)
 2. **KPI Dashboard** — delivery rate, WIP count, AC coverage, never-started items, cycle time, carryover
 3. **Dimension Analysis** — 8 cards with observations, risks, root causes
 4. **Anti-Pattern Detection** — evidence-based pattern cards
@@ -102,7 +288,7 @@ Every report follows this structure regardless of format:
 Before generating the HTML report, **Read** the template at `templates/report.html`.
 
 - Use the exact CSS, HTML structure, and JavaScript from the template
-- Replace all `{{PLACEHOLDER}}` markers with values computed from the sprint data
+- Replace all `{{PLACEHOLDER}}` markers with computed values
 - HTML-escape all Jira-sourced text (issue summaries, descriptions, assignee
   names, comments) before interpolation — escape `&`, `<`, `>`, `"`, `'`
 - For repeating components (dimension cards, KPI cards, anti-pattern cards,
@@ -113,25 +299,53 @@ Before generating the HTML report, **Read** the template at `templates/report.ht
 - Do NOT modify the CSS or JavaScript sections
 - Do NOT add features not present in the template (charts, trend graphs, etc.)
 - Preserve the sidebar table of contents and all section IDs for scroll-spy
-  navigation
 
-## Step 6: Jira Enrichment (Optional)
+### Placeholder Derivation
 
-If Jira MCP is available and the user wants deeper analysis, batch-fetch the
-top 10–15 highest-risk issues via `jira_get_issue` to get changelogs and
-comments. Use a single `jira_search` with JQL `key in (...)` rather than
-individual fetches.
+Key placeholders and how to derive them:
 
-**Important:** Integrate enrichment data on the first write. Do not produce the
-report and then rewrite it — weave the findings in as you go.
+- `{{NEXT_SPRINT_NAME}}` — increment the sprint number if numeric (Sprint 3 → Sprint 4), else "Next Sprint"
+- `{{TEAM_MEMBERS}}` — "F. Last" format, comma-separated, truncate with "..." if >100 chars
+- `{{POSITIVE_SIGNAL}}` — repeat `<li>` for each signal (minimum 3)
+- `{{DELIVERY_RATE_VALUE}}` — "X.X%" (item-based if no story points; label accordingly)
+- `{{DELIVERY_RATE_SUB}}` — "X of Y items completed" or "X of Y points completed"
+- Progress bar widths — use point totals if available, otherwise item counts;
+  show label only if segment width >10%
+
+## Step 6: Changelog Analysis (Conditional)
+
+Changelogs add significant payload. Only request them when needed.
+
+**If changelog data is already present** (from `expand=changelog` in Step 1):
+parse it for the top 10–15 highest-risk items.
+
+**If changelog data is NOT present** and enrichment would add value: fetch it
+for just the highest-risk items using a targeted query
+(`jira_search` with `key in (KEY-1, KEY-2, ...)` and `expand=changelog`).
+
+**If skipping entirely:** note in the report that some anti-patterns (item
+repurposing, hidden work, reassignment churn) could not be assessed.
+
+### What to Extract from Changelogs
+
+| Pattern | What to Look For |
+| --- | --- |
+| Item repurposing | `summary` or `description` field changed mid-sprint |
+| Reassignment | `assignee` changed (signals unclear ownership) |
+| Status churn | item moved backward (e.g., Review → In Progress) |
+| Sprint hopping | `Sprint` field changed (added/removed mid-sprint) |
+| Hidden work | no status transitions since item was added |
+
+Integrate findings into the report on the first write — do not produce the
+report and then rewrite it.
 
 ## Critical Constraints
 
 - Do NOT build Python scripts, CLI tools, or reusable analyzers
 - Do NOT implement features the user didn't ask for (dark mode, PDF export, trend charts, etc.)
-- Batch tool calls wherever possible (parallel `jira_get_issue` calls, not serial)
-- If the user's answers are complete, produce the report without asking follow-up questions
+- Batch tool calls wherever possible (parallel `jira_search` calls, not serial)
 - Stick to the requested output format(s) — don't produce both unless asked
+- After Step 0 approval, execute the full pipeline without stopping between steps
 
 ## Output
 
