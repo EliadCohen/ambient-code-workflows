@@ -22,6 +22,11 @@ The user may provide any combination of: project key, component name, board
 name, team name, sprint name/number, or just a vague reference like "my
 sprint." Extract whatever identifiers are present.
 
+**Search directly for what the user gave you.** If they said "AgentOps",
+call `jira_get_agile_boards(board_name="AgentOps")`. Do NOT call
+`jira_get_all_projects` or enumerate projects — go straight to the
+identifier the user provided.
+
 ### 0b. Discover the Sprint (Jira MCP)
 
 If Jira MCP is available:
@@ -35,8 +40,13 @@ If Jira MCP is available:
    - `jira_get_sprints_from_board(board_id=BOARD_ID, state="active")`
    - If multiple active sprints: include all in proposal and ask which one
    - If none: offer the most recently closed sprint
-3. **Preview the sprint:**
-   - Count items, count unique assignees, note sprint dates and goal
+3. **Get a rough item count** (for the proposal only):
+   - `jira_get_sprint_issues(sprint_id=SPRINT_ID, fields="summary,status,assignee")`
+   - Count total items and unique assignees from the response
+   - Do NOT fetch story points or custom fields yet — that happens in Step 1
+
+This is a lightweight preview. Full field discovery and data ingestion happen
+in Step 1 after the user approves the plan.
 
 ### 0c. Propose a Plan
 
@@ -63,7 +73,10 @@ Set these defaults (user can override any of them):
 | Historical trends | Include if 3+ closed sprints available | "Skip trends" |
 | Sprint | Current active sprint | "Use Sprint 2 instead" |
 
-Wait for user approval before proceeding to Step 1.
+**Wait for user approval, then immediately continue to Step 1.** Any
+affirmative response ("yes", "approve", "looks good", "proceed", "continue")
+means go. If the user requests changes, adjust the plan and re-propose. Do
+not stall or ask for further confirmation after receiving approval.
 
 ### 0d. CSV or Other Source
 
@@ -74,20 +87,27 @@ If Jira MCP is not available, or the user provides a CSV:
 
 ## Step 1: Ingest Data
 
+The user has approved the plan. Now fetch the full data set.
+
 ### 1a. Discover Custom Fields
 
-Read `references/jira-fields.md` for common field ID patterns. Then confirm
-the correct IDs for this instance:
+Read `references/jira-fields.md` for known field IDs. If the Jira instance
+is `redhat.atlassian.net`, use the confirmed IDs in the "Known Fields"
+section — no discovery needed.
+
+For other instances, confirm the correct IDs:
 
 - Use `jira_search_fields` to search for "story point" and "sprint"
 - Or fetch a single issue with all fields and inspect the keys:
   `jira_search("project = X ORDER BY created DESC", maxResults=1, fields="*all")`
 - Record the story points field ID and sprint field ID for subsequent queries
 
-### 1b. Query Sprint Issues
+### 1b. Query Sprint Issues (Full Fetch)
 
-Use an **explicit field list** — see `references/jira-query-patterns.md` for
-details.
+Now re-fetch the sprint data with the **complete field list**. The lightweight
+query from Step 0b was just for the proposal — this is the real data pull.
+
+See `references/jira-query-patterns.md` for details.
 
 ```
 jira_get_sprint_issues(
@@ -96,7 +116,7 @@ jira_get_sprint_issues(
 )
 ```
 
-Replace `customfield_XXXXX` and `customfield_YYYYY` with the IDs found in 1a.
+Replace `customfield_XXXXX` and `customfield_YYYYY` with the IDs from 1a.
 
 **DO NOT use `fields=*all`** — this returns 100+ custom fields per issue and
 can produce 500k+ characters, exceeding tool output limits.
