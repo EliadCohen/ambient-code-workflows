@@ -13,7 +13,20 @@ you back here with the proper workflow context.
 
 ---
 
-You are preparing to submit a bug fix as a pull request. This skill provides a
+## Workflow Context
+
+This skill is workflow-agnostic. The following values are set by the calling
+workflow and used throughout this document:
+
+| Variable | Value |
+| --- | --- |
+| `WORKFLOW_NAME` | `bugfix` |
+| `ARTIFACT_DIR` | `artifacts/bugfix/` |
+| `COORDINATOR_SKILL` | `.claude/skills/controller/SKILL.md` |
+
+---
+
+You are preparing to submit changes as a pull request. This skill provides a
 systematic, failure-resistant process for getting code from the working directory
 into a PR. It handles the common obstacles: authentication, fork workflows,
 remote configuration, and cross-repo PR creation.
@@ -27,7 +40,7 @@ fallback ladder at the bottom of this file.
 
 ## Your Role
 
-Get the bug fix changes submitted as a draft pull request. Handle the full
+Get the changes submitted as a draft pull request. Handle the full
 git workflow: branch, commit, push, and PR creation. When steps fail, follow
 the documented recovery paths instead of guessing.
 
@@ -59,7 +72,7 @@ These are determined during pre-flight checks. Record each value as you go.
 | `FORK_OWNER` | Step 3: owner portion of fork's `nameWithOwner`, or `GH_USER` if newly created | `jsmith` |
 | `FORK_REMOTE` | Step 4: the git remote name pointing to the fork | `fork` / `origin` |
 | `REPO` | The repository name (without owner) | `myproject` |
-| `BRANCH_NAME` | Step 5: the branch you create | `bugfix/issue-42-null-check` |
+| `BRANCH_NAME` | Step 5: the branch you create | `feature/issue-42-auth-middleware` |
 
 ### Step 0: Determine Auth Context
 
@@ -129,7 +142,7 @@ checks above to set `AUTH_TYPE` and `GH_USER`.
 
 ### Step 1: Locate the Project Repository
 
-The bugfix workflow runs from the workflow directory, but the code changes live
+The workflow runs from the workflow directory, but the code changes live
 in the project repository. Before doing any git work:
 
 ```bash
@@ -163,7 +176,7 @@ git config user.email "GH_USER@users.noreply.github.com"
 ```
 
 - If missing and `gh` is NOT authenticated: set reasonable defaults so commits
-  work. Use `"bugfix-workflow"` / `"bugfix@workflow.local"` as placeholders.
+  work. Use `"workflow-agent"` / `"workflow@agent.local"` as placeholders.
 
 **2b. Inventory existing remotes:**
 
@@ -461,13 +474,17 @@ git rebase FORK_REMOTE/DEFAULT_BRANCH
 git checkout -b BRANCH_NAME
 ```
 
-Branch naming conventions:
+Branch naming conventions — choose the prefix that matches the work type:
 
-- `bugfix/issue-NUMBER-SHORT_DESCRIPTION` if there's an issue number
-- `bugfix/SHORT_DESCRIPTION` if there's no issue number
-- Use kebab-case, keep it under 50 characters
+- `bugfix/issue-NUMBER-SHORT_DESCRIPTION` — bug fixes
+- `feature/issue-NUMBER-SHORT_DESCRIPTION` — new features
+- `refactor/SHORT_DESCRIPTION` — refactoring
+- `docs/SHORT_DESCRIPTION` — documentation changes
 
-If a branch already exists with the changes (from a prior `/fix` phase), use
+Use kebab-case, keep it under 50 characters. Include the issue number when one
+exists.
+
+If a branch already exists with the changes (from a prior phase), use
 it instead of creating a new one.
 
 ### Step 6: Stage and Commit
@@ -476,22 +493,24 @@ Stage changes selectively (`git add path/to/files`, not `git add .`), review
 with `git status`, then commit using conventional commit format:
 
 ```bash
-git commit -m "fix(SCOPE): SHORT_DESCRIPTION
+git commit -m "TYPE(SCOPE): SHORT_DESCRIPTION
 
 DETAILED_DESCRIPTION
 
 Fixes #ISSUE_NUMBER"
 ```
 
-Use prior artifacts (root cause analysis, implementation notes) to write an
+Where `TYPE` matches the work: `fix`, `feat`, `refactor`, `docs`, `test`, etc.
+
+Use prior artifacts (analysis, implementation notes) to write an
 accurate commit message. Don't make up details.
 
 **Include the PR description in the commit body.** When a PR has a single
 commit, GitHub auto-fills the PR description from the commit message. This
 ensures the PR form is pre-populated even when `gh pr create` fails (a
-common case for bot environments). If `artifacts/bugfix/docs/pr-description.md`
+common case for bot environments). If `ARTIFACT_DIR/docs/pr-description.md`
 exists, append its content after the `Fixes #N` line. If it doesn't exist,
-compose a brief PR body from session context (problem, root cause, fix, testing)
+compose a brief PR body from session context (problem, approach, testing)
 and include that instead.
 
 ### Step 7: Push to Fork
@@ -532,8 +551,8 @@ gh pr create \
   --repo UPSTREAM_OWNER/REPO \
   --head FORK_OWNER:BRANCH_NAME \
   --base DEFAULT_BRANCH \
-  --title "fix(SCOPE): SHORT_DESCRIPTION" \
-  --body-file artifacts/bugfix/docs/pr-description.md
+  --title "TYPE(SCOPE): SHORT_DESCRIPTION" \
+  --body-file ARTIFACT_DIR/docs/pr-description.md
 ```
 
 `--head` must be `FORK_OWNER:BRANCH_NAME` format (with the owner prefix) for
@@ -545,7 +564,7 @@ composed from session artifacts.
 This is a common and expected outcome when running as a GitHub App bot.
 Do NOT retry, do NOT debug further, do NOT fall back to a patch file. Instead:
 
-1. **Write the PR description** to `artifacts/bugfix/docs/pr-description.md`
+1. **Write the PR description** to `ARTIFACT_DIR/docs/pr-description.md`
    (if not already written).
 
 2. **Give the user a pre-filled GitHub compare URL** with `title` and `body`
@@ -607,7 +626,7 @@ Diagnose it using the Error Recovery table and retry.
 If `gh pr create` fails but the branch is pushed to the fork (this is a
 **common and expected** outcome when running as a GitHub App bot):
 
-1. **Write the PR body** to `artifacts/bugfix/docs/pr-description.md`
+1. **Write the PR body** to `ARTIFACT_DIR/docs/pr-description.md`
 2. **Provide the compare URL with `title` and `body` query params** so the
    PR form opens fully populated (see Step 8 failure path for format)
 3. **Provide clone-and-checkout commands** for local testing
@@ -627,16 +646,16 @@ If no fork exists and automated forking fails:
 Only if ALL of the above fail — for example, the user has no GitHub account,
 or network access is completely blocked:
 
-1. Generate a patch: `git diff > bugfix.patch`
-2. Write it to `artifacts/bugfix/bugfix.patch`
-3. Explain to the user how to apply it: `git apply bugfix.patch`
+1. Generate a patch: `git diff > changes.patch`
+2. Write it to `ARTIFACT_DIR/changes.patch`
+3. Explain to the user how to apply it: `git apply changes.patch`
 4. **Acknowledge this is a degraded experience** and explain what prevented
    the normal flow
 
 ## Output
 
 - The PR URL (printed to the user)
-- Optionally updates `artifacts/bugfix/docs/pr-description.md` if it didn't
+- Optionally updates `ARTIFACT_DIR/docs/pr-description.md` if it didn't
   already exist
 
 ## Usage Examples
@@ -676,13 +695,13 @@ or network access is completely blocked:
 
 ## Notes
 
-- This skill assumes the bug fix work (code changes, tests) is already done.
-  Run `/fix` and `/test` first.
-- If `/document` was run, the PR description artifact should already exist at
-  `artifacts/bugfix/docs/pr-description.md`. This skill will use it.
-- If `/document` was NOT run, this skill creates a minimal PR body from
-  session context (conversation history, prior artifacts).
-- The fork workflow is the standard for open source contributions. Even if the
+- This skill assumes the implementation work (code changes, tests) is already
+  done before invoking `/pr`.
+- If a PR description artifact exists at `ARTIFACT_DIR/docs/pr-description.md`,
+  this skill will use it.
+- If no PR description artifact exists, this skill creates a minimal PR body
+  from session context (conversation history, prior artifacts).
+- The fork workflow is the standard for open-source contributions. Even if the
   user has write access to upstream, using a fork keeps the upstream clean.
 
 ## When This Phase Is Done
@@ -693,4 +712,5 @@ Report your results:
 - What was included
 - Any follow-up actions needed (mark ready for review, add reviewers, etc.)
 
-Then announce which file you are returning to (e.g., "Returning to `.claude/skills/controller/SKILL.md`." or "Returning to `.claude/skills/speedrun/SKILL.md` for next phase.") and **re-read that file** for next-step guidance.
+Then announce that you are returning to `COORDINATOR_SKILL` and **re-read
+that file** for next-step guidance.
