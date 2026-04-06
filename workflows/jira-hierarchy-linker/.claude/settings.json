@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "jira": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-jira"
+      ],
+      "env": {
+        "JIRA_URL": "${JIRA_URL}",
+        "JIRA_EMAIL": "${JIRA_EMAIL}",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
+      }
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Write",
+      "Edit",
+      "Grep",
+      "Glob"
+    ],
+    "deny": [
+      "Bash(rm -rf)"
+    ]
+  }
+}
