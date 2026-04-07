@@ -9,6 +9,10 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
 - `/hygiene.setup` must be run first
 - User should specify which epics/initiatives to summarize
 
+**Optional** (for enhanced PR/MR summaries):
+- `GITHUB_TOKEN` - For direct GitHub API access if Jira integration unavailable
+- `GITLAB_TOKEN` - For direct GitLab API access if Jira integration unavailable
+
 ## Process
 
 1. **Load configuration**:
@@ -43,13 +47,24 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
         - Priority changes
       - Fetch comments: GET `/rest/api/3/issue/{childKey}/comment`
       - Count comments from past 7 days
+      
+      **Also check for linked MRs/PRs**:
+      - Fetch development info: GET `/rest/dev-status/1.0/issue/detail?issueId={issueId}&applicationType=github&dataType=pullrequest`
+      - Also check GitLab: `applicationType=gitlab&dataType=mergerequest`
+      - Parse PR/MR URLs from comments and description
+      - For each linked PR/MR with activity in past 7 days:
+        - Fetch PR details from GitHub/GitLab API
+        - Extract: status (open/merged/closed), commits added, reviews, last updated
+        - Note: PR/MR must have `updated_at` within past 7 days to include
    
    c. **Generate summary paragraph**:
-      - Template: "This week, {status_summary}. {assignment_summary}. {activity_summary}."
+      - Template: "This week, {status_summary}. {pr_summary}. {assignment_summary}. {activity_summary}."
       - Status summary: "X stories moved to In Progress, Y completed"
-      - Assignment summary: "Z new assignments" (if any)
-      - Activity summary: "N comments across M stories" (if significant)
-      - Keep to 2-4 sentences, business-friendly language
+      - PR/MR summary: "Z pull requests merged, N in review" (if any PR/MR activity)
+      - Assignment summary: "M new assignments" (if any)
+      - Activity summary: "P comments across Q stories" (if significant)
+      - Keep to 3-5 sentences, business-friendly language
+      - Prioritize PR/MR activity in summary (shows concrete progress)
    
    d. **Write summary to file**:
       - Save to `artifacts/jira-hygiene/summaries/{epic-key}-{date}.md`
@@ -87,13 +102,17 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
 
 ## Summary
 
-This week, 3 stories moved to In Progress and 2 were completed. The team made 4 new assignments across the authentication work. There were 12 comments discussing API integration challenges and OAuth implementation details.
+This week, 3 stories moved to In Progress and 2 were completed. The team merged 2 pull requests and has 3 PRs in active review. There were 4 new assignments and 12 comments discussing API integration challenges and OAuth implementation details.
 
 ## Activity Breakdown
 
 - Status transitions: 5 changes
   - New → In Progress: STORY-101, STORY-102, STORY-103
   - In Progress → Done: STORY-98, STORY-99
+- Pull Requests: 5 active
+  - Merged: PR#145 (OAuth integration), PR#148 (Token refresh)
+  - In Review: PR#150 (SSO support), PR#151 (Session management), PR#152 (Password reset)
+  - Commits this week: 18 commits across 5 PRs
 - Assignments: 4 new
 - Comments: 12 across 6 stories
 ```
@@ -101,20 +120,34 @@ This week, 3 stories moved to In Progress and 2 were completed. The team made 4 
 ## Summary Generation Guidelines
 
 **Good summary**:
-> "This week, 3 stories moved to In Progress and 2 were completed. The team made 4 new assignments. Discussion focused on OAuth implementation with 8 comments across 4 stories."
+> "This week, 3 stories moved to In Progress and 2 were completed. The team merged 2 pull requests for OAuth integration and has 3 PRs in active review. There were 4 new assignments and 8 comments focused on implementation details."
 
 **Bad summary** (too technical):
-> "This week, STORY-101 transitioned from status ID 10001 to 10002. User john.doe was assigned to STORY-102..."
+> "This week, STORY-101 transitioned from status ID 10001 to 10002. User john.doe was assigned to STORY-102. Commit SHA abc123 was pushed to PR #145..."
 
 **Focus on**:
 - High-level progress (stories moved, completed)
+- PR/MR activity (merged, in review, commit volume)
 - Team activity (assignments, discussions)
 - Notable trends (if detectable)
 
 **Avoid**:
 - Listing every ticket key
-- Technical jargon
+- Commit SHAs or technical identifiers
 - Implementation details
+- Individual developer names (use "the team")
+
+**PR/MR Details to Include**:
+- Number merged vs in review
+- PR titles (if descriptive, e.g., "OAuth integration")
+- Significant milestones (e.g., "first PR merged this epic")
+- Overall commit volume (e.g., "18 commits this week")
+
+**PR/MR Details to Exclude**:
+- Commit messages
+- Code review comments
+- Individual file changes
+- Specific reviewers
 
 ## Error Handling
 
@@ -122,3 +155,68 @@ This week, 3 stories moved to In Progress and 2 were completed. The team made 4 
 - **No activity**: "No significant activity this week"
 - **Changelog unavailable**: Fall back to issue update dates
 - **Comment fetch failed**: Skip comment count, note in log
+- **Development info unavailable**: Not all Jira instances have GitHub/GitLab integration; skip PR/MR section
+- **PR/MR API access denied**: May need GitHub/GitLab tokens; proceed without PR/MR data
+
+## GitHub/GitLab Integration
+
+### Jira Development Panel API
+
+**Endpoint**: `/rest/dev-status/1.0/issue/detail?issueId={issueId}&applicationType={type}&dataType={dataType}`
+
+**Supported integrations**:
+- GitHub: `applicationType=github&dataType=pullrequest`
+- GitLab: `applicationType=gitlab&dataType=mergerequest`
+- Bitbucket: `applicationType=bitbucket&dataType=pullrequest`
+
+**Response includes**:
+- PR/MR URLs
+- Status (open, merged, closed)
+- Last updated timestamp
+- Review status
+
+### GitHub API (if direct access needed)
+
+**Environment variables** (optional):
+- `GITHUB_TOKEN` - GitHub personal access token
+- `GITHUB_API_URL` - Default: https://api.github.com
+
+**Endpoint**: `GET /repos/{owner}/{repo}/pulls/{number}`
+
+**Fetch**:
+- `state` (open, closed)
+- `merged_at` (if merged)
+- `updated_at` (filter by this)
+- `commits` count
+- `additions`, `deletions` (code churn)
+- `reviews` count
+
+### GitLab API (if direct access needed)
+
+**Environment variables** (optional):
+- `GITLAB_TOKEN` - GitLab personal access token
+- `GITLAB_API_URL` - Default: https://gitlab.com/api/v4
+
+**Endpoint**: `GET /projects/{id}/merge_requests/{iid}`
+
+**Fetch**:
+- `state` (opened, merged, closed)
+- `merged_at` (if merged)
+- `updated_at` (filter by this)
+- `user_notes_count` (comments)
+
+### Date Filtering
+
+Only include PR/MR in summary if:
+- `updated_at` >= (now - 7 days)
+- OR `merged_at` >= (now - 7 days)
+
+This ensures only recent PR/MR activity is included in weekly summary.
+
+### Fallback: Parse URLs from Comments
+
+If Jira development panel is unavailable:
+1. Search issue comments for GitHub/GitLab URLs
+2. Extract PR/MR numbers from URLs (e.g., `/pull/123`, `/merge_requests/456`)
+3. Fetch details directly from GitHub/GitLab API
+4. Filter by update date

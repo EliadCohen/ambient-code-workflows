@@ -128,13 +128,20 @@ Generate weekly activity summaries for epics/initiatives.
 **What it does**:
 - Analyzes child items for the past 7 days
 - Tracks status transitions, assignments, comments
+- **Includes linked PR/MR activity** (merged, in review, commits)
 - Generates business-friendly summary paragraph
 - Posts summary as comment on epic/initiative
 
 **Review-then-execute**: Yes (shows summaries before posting)
 
+**PR/MR Integration**:
+- Automatically detects linked GitHub/GitLab PRs via Jira development panel
+- Falls back to parsing PR URLs from comments
+- Filters by last update date (past 7 days only)
+- Optional: Set `GITHUB_TOKEN` or `GITLAB_TOKEN` for direct API access
+
 **Example summary**:
-> This week, 3 stories moved to In Progress and 2 were completed. The team made 4 new assignments. Discussion focused on OAuth implementation with 8 comments across 4 stories.
+> This week, 3 stories moved to In Progress and 2 were completed. The team merged 2 pull requests for OAuth integration and has 3 PRs in active review. There were 4 new assignments and 8 comments focused on implementation details.
 
 ---
 
