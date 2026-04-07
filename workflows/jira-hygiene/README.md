@@ -60,6 +60,8 @@ Your Jira account must have:
 
 ## Commands
 
+The workflow provides **11 specialized commands** for comprehensive Jira hygiene management.
+
 ### Setup & Configuration
 
 #### `/hygiene.setup`
@@ -120,6 +122,55 @@ Link orphaned epics to initiatives across projects.
 ---
 
 ### Activity & Reporting
+
+#### `/hygiene.report`
+
+Generate comprehensive master hygiene report with health score.
+
+**What it does**:
+- Runs all hygiene checks (read-only, no modifications)
+- Calculates project health score (0-100)
+- Provides executive summary with issue counts
+- Lists top issues in each category
+- Recommends which commands to run
+- Generates detailed sections for all hygiene categories
+
+**Health Score**:
+- 90-100: Excellent 🟢
+- 70-89: Good 🟡
+- 50-69: Needs Attention 🟠
+- 0-49: Critical 🔴
+
+**Categories Checked**:
+- Orphaned stories and epics
+- Blocking tickets
+- Stale tickets (by priority)
+- Untriaged items
+- Blocking-closed mismatches
+- In-progress unassigned
+- Missing activity types
+
+**Arguments**:
+- `--output <path>` - Custom output path
+- `--format <md|html>` - Output format (default: md)
+
+**Example output**:
+```
+Project Hygiene Report: PROJ
+Health Score: 73/100 🟡 Good
+
+Issues Found:
+• 15 orphaned stories
+• 3 blocking tickets
+• 12 stale tickets
+• 5 untriaged items
+
+Full report: artifacts/jira-hygiene/reports/master-report.md
+```
+
+**Use case**: Weekly hygiene check, stakeholder reporting, project health dashboard
+
+---
 
 #### `/hygiene.activity-summary`
 

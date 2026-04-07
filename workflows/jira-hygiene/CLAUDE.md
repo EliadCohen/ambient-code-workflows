@@ -1,8 +1,9 @@
 # Jira Hygiene Workflow
 
-Systematic Jira project hygiene through 10 specialized commands:
+Systematic Jira project hygiene through 11 specialized commands:
 
 **Setup**: `/hygiene.setup`  
+**Reporting**: `/hygiene.report` (master report with health score)  
 **Linking**: `/hygiene.link-epics`, `/hygiene.link-initiatives`  
 **Activity**: `/hygiene.activity-summary`, `/hygiene.show-blocking`  
 **Bulk Ops**: `/hygiene.close-stale`, `/hygiene.triage-new`  
