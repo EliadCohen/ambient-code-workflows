@@ -36,26 +36,30 @@ Highlight tickets marked as "Blocking" where all of the blocked tickets are alre
       - If ALL blocked tickets are closed: flag for review
       - If at least one blocked ticket is open: skip (still validly blocking)
 
-4. **Write report**:
+4. **Write report with Jira links**:
    - Save to `artifacts/jira-hygiene/reports/blocking-closed-mismatch.md`
    - Include: blocking ticket key, summary, list of closed blocked tickets
+   - Format ticket keys as clickable links: `[{KEY}]({JIRA_URL}/browse/{KEY})`
+   - Include search link at top to view all blocking tickets in Jira
 
-5. **Display report**:
+5. **Display report with Jira links**:
    ```
    Found N blocking tickets where all dependencies are closed:
    
-   PROJ-123 "Fix database migration issue"
+   [{PROJ-123}]({JIRA_URL}/browse/PROJ-123) "Fix database migration issue"
      Blocks (all closed):
-     - PROJ-145 "Deploy new schema" (Closed 5 days ago)
-     - PROJ-167 "Update migration scripts" (Closed 3 days ago)
+     - [{PROJ-145}]({JIRA_URL}/browse/PROJ-145) "Deploy new schema" (Closed 5 days ago)
+     - [{PROJ-167}]({JIRA_URL}/browse/PROJ-167) "Update migration scripts" (Closed 3 days ago)
      
      Suggested action: Close PROJ-123 or remove blocking links
    
-   PROJ-456 "Security audit blocker"
+   [{PROJ-456}]({JIRA_URL}/browse/PROJ-456) "Security audit blocker"
      Blocks (all closed):
-     - PROJ-500 "Implement OAuth" (Closed 2 weeks ago)
+     - [{PROJ-500}]({JIRA_URL}/browse/PROJ-500) "Implement OAuth" (Closed 2 weeks ago)
      
      Suggested action: Close PROJ-456 or remove blocking link
+   
+   Full report: artifacts/jira-hygiene/reports/blocking-closed-mismatch.md
    ```
 
 6. **No bulk operation**:
@@ -74,7 +78,8 @@ Highlight tickets marked as "Blocking" where all of the blocked tickets are alre
 
 **Project**: PROJ  
 **Generated**: 2026-04-07 10:30 UTC  
-**Total Mismatches**: 3 tickets
+**Total Mismatches**: 3 tickets  
+**[View all blocking tickets in Jira](https://company.atlassian.net/issues/?jql=project+%3D+PROJ+AND+issueFunction+in+linkedIssuesOf%28%22project+%3D+PROJ%22%2C+%22blocks%22%29+AND+resolution+%3D+Unresolved)**
 
 ## Summary
 
@@ -82,34 +87,34 @@ Found 3 tickets that are still marked as blocking, but all blocked items are alr
 
 ## Tickets Requiring Review
 
-### PROJ-123 "Fix database migration issue"
+### [PROJ-123](https://company.atlassian.net/browse/PROJ-123) "Fix database migration issue"
 
 **Status**: In Progress  
 **Last Updated**: 2026-03-25
 
 **Blocks** (all closed):
-- PROJ-145 "Deploy new schema" (Closed: 2026-04-02, 5 days ago)
-- PROJ-167 "Update migration scripts" (Closed: 2026-04-04, 3 days ago)
+- [PROJ-145](https://company.atlassian.net/browse/PROJ-145) "Deploy new schema" (Closed: 2026-04-02, 5 days ago)
+- [PROJ-167](https://company.atlassian.net/browse/PROJ-167) "Update migration scripts" (Closed: 2026-04-04, 3 days ago)
 
 **Suggested Actions**:
-1. If migration issue is resolved: Close PROJ-123
+1. If migration issue is resolved: Close [PROJ-123](https://company.atlassian.net/browse/PROJ-123)
 2. If new blockers emerged: Update links to reflect current blockers
 3. If no longer blocking: Remove the "blocks" links
 
 ---
 
-### PROJ-456 "Security audit blocker"
+### [PROJ-456](https://company.atlassian.net/browse/PROJ-456) "Security audit blocker"
 
 **Status**: To Do  
 **Last Updated**: 2026-03-15
 
 **Blocks** (all closed):
-- PROJ-500 "Implement OAuth" (Closed: 2026-03-24, 14 days ago)
+- [PROJ-500](https://company.atlassian.net/browse/PROJ-500) "Implement OAuth" (Closed: 2026-03-24, 14 days ago)
 
 **Suggested Actions**:
-1. If audit is complete: Close PROJ-456
+1. If audit is complete: Close [PROJ-456](https://company.atlassian.net/browse/PROJ-456)
 2. If audit revealed new work: Create new tickets and update links
-3. If audit was cancelled: Close PROJ-456
+3. If audit was cancelled: Close [PROJ-456](https://company.atlassian.net/browse/PROJ-456)
 
 ---
 

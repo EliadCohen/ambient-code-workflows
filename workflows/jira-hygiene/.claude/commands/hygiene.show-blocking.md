@@ -21,18 +21,24 @@ Simple query to display all tickets marked with "Blocker" priority in the projec
    - Fetch: key, summary, assignee, status, created, updated
    - Order by updated descending (most recent first)
 
-3. **Format as markdown table**:
+3. **Format as markdown table with Jira links**:
    ```markdown
    # Blocking Tickets in {PROJECT}
    
    **Total**: N tickets
    **Generated**: {timestamp}
+   **[View in Jira]({JIRA_URL}/issues/?jql=project+%3D+{PROJECT}+AND+priority+%3D+Blocker+AND+resolution+%3D+Unresolved)**
    
    | Key | Summary | Assignee | Status | Age | Last Updated |
    |-----|---------|----------|--------|-----|--------------|
-   | PROJ-123 | Critical API failure | John Doe | In Progress | 5d | 2d ago |
-   | PROJ-456 | Database migration blocked | Unassigned | To Do | 12d | 3d ago |
+   | [PROJ-123]({JIRA_URL}/browse/PROJ-123) | Critical API failure | John Doe | In Progress | 5d | 2d ago |
+   | [PROJ-456]({JIRA_URL}/browse/PROJ-456) | Database migration blocked | Unassigned | To Do | 12d | 3d ago |
    ```
+   
+   **Link format**:
+   - Ticket links: `[{KEY}]({JIRA_URL}/browse/{KEY})`
+   - Search link: `[View in Jira]({JIRA_URL}/issues/?jql={URL_ENCODED_JQL})`
+   - URL-encode JQL: spaces → `+`, special chars → percent-encoded
 
 4. **Write report**:
    - Save to `artifacts/jira-hygiene/reports/blocking-tickets.md`
@@ -52,7 +58,8 @@ Simple query to display all tickets marked with "Blocker" priority in the projec
 # Blocking Tickets in PROJ
 
 **Total**: 3 tickets  
-**Generated**: 2026-04-07 10:30 UTC
+**Generated**: 2026-04-07 10:30 UTC  
+**[View in Jira](https://company.atlassian.net/issues/?jql=project+%3D+PROJ+AND+priority+%3D+Blocker+AND+resolution+%3D+Unresolved)**
 
 ## Summary
 
@@ -64,14 +71,14 @@ Simple query to display all tickets marked with "Blocker" priority in the projec
 
 | Key | Summary | Assignee | Status | Age | Last Updated |
 |-----|---------|----------|--------|-----|--------------|
-| PROJ-123 | Critical API failure in auth endpoint | John Doe | In Progress | 5d | 2d ago |
-| PROJ-456 | Database migration blocked by schema lock | Unassigned | To Do | 12d | 3d ago |
-| PROJ-789 | Production deployment failing | Jane Smith | Code Review | 3d | 1d ago |
+| [PROJ-123](https://company.atlassian.net/browse/PROJ-123) | Critical API failure in auth endpoint | John Doe | In Progress | 5d | 2d ago |
+| [PROJ-456](https://company.atlassian.net/browse/PROJ-456) | Database migration blocked by schema lock | Unassigned | To Do | 12d | 3d ago |
+| [PROJ-789](https://company.atlassian.net/browse/PROJ-789) | Production deployment failing | Jane Smith | Code Review | 3d | 1d ago |
 
 ## Recommendations
 
-- **PROJ-456**: Assign to database team immediately (unassigned for 12 days)
-- **PROJ-123**: Follow up on progress (blocker for 5 days)
+- **[PROJ-456](https://company.atlassian.net/browse/PROJ-456)**: Assign to database team immediately (unassigned for 12 days)
+- **[PROJ-123](https://company.atlassian.net/browse/PROJ-123)**: Follow up on progress (blocker for 5 days)
 ```
 
 ## Error Handling

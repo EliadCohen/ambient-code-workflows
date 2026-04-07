@@ -21,18 +21,23 @@ Simple query to find tickets that are marked as "In Progress" but have no assign
    - Fetch: key, summary, status, created, updated, reporter
    - Order by updated descending
 
-3. **Format as markdown table**:
+3. **Format as markdown table with Jira links**:
    ```markdown
    # In-Progress Tickets Without Assignee
    
    **Total**: N tickets
    **Generated**: {timestamp}
+   **[View in Jira]({JIRA_URL}/issues/?jql=project+%3D+{PROJECT}+AND+status+%3D+%22In+Progress%22+AND+assignee+is+EMPTY+AND+resolution+%3D+Unresolved)**
    
    | Key | Summary | Status | Reporter | Age | Last Updated |
    |-----|---------|--------|----------|-----|--------------|
-   | PROJ-123 | Implement new API | In Progress | John Doe | 8d | 2d ago |
-   | PROJ-456 | Fix login bug | In Progress | Jane Smith | 5d | 1d ago |
+   | [PROJ-123]({JIRA_URL}/browse/PROJ-123) | Implement new API | In Progress | John Doe | 8d | 2d ago |
+   | [PROJ-456]({JIRA_URL}/browse/PROJ-456) | Fix login bug | In Progress | Jane Smith | 5d | 1d ago |
    ```
+   
+   **Link format**:
+   - Ticket links: `[{KEY}]({JIRA_URL}/browse/{KEY})`
+   - Search link: URL-encode JQL (spaces → `+` or `%20`, quotes → `%22`)
 
 4. **Write report**:
    - Save to `artifacts/jira-hygiene/reports/unassigned-progress.md`
@@ -53,7 +58,8 @@ Simple query to find tickets that are marked as "In Progress" but have no assign
 
 **Project**: PROJ  
 **Generated**: 2026-04-07 10:30 UTC  
-**Total**: 4 tickets
+**Total**: 4 tickets  
+**[View in Jira](https://company.atlassian.net/issues/?jql=project+%3D+PROJ+AND+status+%3D+%22In+Progress%22+AND+assignee+is+EMPTY+AND+resolution+%3D+Unresolved)**
 
 ## Summary
 
@@ -66,21 +72,21 @@ Found 4 tickets marked as "In Progress" but with no assignee. These tickets may 
 
 | Key | Summary | Status | Reporter | Age | Last Updated |
 |-----|---------|--------|----------|-----|--------------|
-| PROJ-789 | Refactor authentication module | In Progress | John Doe | 12d | 5d ago |
-| PROJ-123 | Implement new API endpoint | In Progress | John Doe | 8d | 2d ago |
-| PROJ-456 | Fix login bug on mobile | In Progress | Jane Smith | 5d | 1d ago |
-| PROJ-234 | Update documentation | In Progress | Bob Johnson | 3d | 6h ago |
+| [PROJ-789](https://company.atlassian.net/browse/PROJ-789) | Refactor authentication module | In Progress | John Doe | 12d | 5d ago |
+| [PROJ-123](https://company.atlassian.net/browse/PROJ-123) | Implement new API endpoint | In Progress | John Doe | 8d | 2d ago |
+| [PROJ-456](https://company.atlassian.net/browse/PROJ-456) | Fix login bug on mobile | In Progress | Jane Smith | 5d | 1d ago |
+| [PROJ-234](https://company.atlassian.net/browse/PROJ-234) | Update documentation | In Progress | Bob Johnson | 3d | 6h ago |
 
 ## Recommendations
 
 **Immediate Action Needed**:
-- **PROJ-789**: No updates in 5 days, assign or move back to backlog
-- **PROJ-123**: Assign to team member actively working on API
+- **[PROJ-789](https://company.atlassian.net/browse/PROJ-789)**: No updates in 5 days, assign or move back to backlog
+- **[PROJ-123](https://company.atlassian.net/browse/PROJ-123)**: Assign to team member actively working on API
 
 **By Reporter**:
-- John Doe (2 tickets): Follow up on PROJ-789 and PROJ-123
-- Jane Smith (1 ticket): Assign PROJ-456 or update status
-- Bob Johnson (1 ticket): Recent activity on PROJ-234, verify assignment needed
+- John Doe (2 tickets): Follow up on [PROJ-789](https://company.atlassian.net/browse/PROJ-789) and [PROJ-123](https://company.atlassian.net/browse/PROJ-123)
+- Jane Smith (1 ticket): Assign [PROJ-456](https://company.atlassian.net/browse/PROJ-456) or update status
+- Bob Johnson (1 ticket): Recent activity on [PROJ-234](https://company.atlassian.net/browse/PROJ-234), verify assignment needed
 
 ## Common Causes
 

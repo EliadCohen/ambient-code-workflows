@@ -51,15 +51,19 @@ Find stories without epic links and suggest appropriate epics to link them to, u
    - Save to `artifacts/jira-hygiene/candidates/link-epics.json`
    - Include: story key, story summary, suggested action, epic key (if linking), match score
 
-5. **Display summary**:
+5. **Display summary with Jira links**:
    ```
    Found N orphaned stories:
    - M stories with good matches (≥50%)
    - P stories need new epics (<50% match)
    
+   View orphaned stories: {JIRA_URL}/issues/?jql=project+%3D+{PROJECT}+AND+issuetype+%3D+Story+AND+%22Epic+Link%22+is+EMPTY
+   
    Top suggestions:
-   [STORY-123] "Implement user login" → [EPIC-45] "Authentication System" (75% match)
-   [STORY-124] "Add payment gateway" → Create new epic (0% match)
+   • [{STORY-123}]({JIRA_URL}/browse/STORY-123) "Implement user login" 
+     → [{EPIC-45}]({JIRA_URL}/browse/EPIC-45) "Authentication System" (75% match)
+   • [{STORY-124}]({JIRA_URL}/browse/STORY-124) "Add payment gateway" 
+     → Create new epic (0% match)
    ```
 
 6. **Ask for confirmation**:

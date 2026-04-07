@@ -54,19 +54,25 @@ Optional:
    - Save to `artifacts/jira-hygiene/candidates/triage-new.json`
    - Include: key, summary, suggested priority, confidence, similar item count
 
-5. **Display summary**:
+5. **Display summary with Jira links**:
    ```
    Found N untriaged items (>7 days):
    
+   View untriaged: {JIRA_URL}/issues/?jql=project+%3D+{PROJECT}+AND+status+%3D+New+AND+created+%3C+-7d
+   
    High confidence (≥5 similar items): 8 items
-     PROJ-200 "Add export feature" → Priority: Medium (based on 8 similar items)
-     PROJ-201 "Fix broken link" → Priority: Low (based on 6 similar items)
+     • [{PROJ-200}]({JIRA_URL}/browse/PROJ-200) "Add export feature" 
+       → Priority: Medium (based on 8 similar items)
+     • [{PROJ-201}]({JIRA_URL}/browse/PROJ-201) "Fix broken link" 
+       → Priority: Low (based on 6 similar items)
    
    Medium confidence (2-4 similar): 3 items
-     PROJ-202 "Improve performance" → Priority: High (based on 3 similar items)
+     • [{PROJ-202}]({JIRA_URL}/browse/PROJ-202) "Improve performance" 
+       → Priority: High (based on 3 similar items)
    
    Low confidence (0-1 similar): 2 items
-     PROJ-203 "New integration request" → Priority: Medium (default, no similar items)
+     • [{PROJ-203}]({JIRA_URL}/browse/PROJ-203) "New integration request" 
+       → Priority: Medium (default, no similar items)
    ```
 
 6. **Ask for confirmation**:

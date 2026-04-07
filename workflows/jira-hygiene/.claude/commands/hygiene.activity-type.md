@@ -59,19 +59,23 @@ Optional:
    - Save to `artifacts/jira-hygiene/candidates/activity-type.json`
    - Include: key, summary, suggested activity type, confidence, matching keywords
 
-5. **Display summary**:
+5. **Display summary with Jira links**:
    ```
    Found N tickets missing Activity Type:
    
    High confidence (≥3 keyword matches): 12 tickets
-     PROJ-100 "Fix broken login flow" → Bug Fix (keywords: fix, broken, bug)
-     PROJ-101 "Document API endpoints" → Documentation (keywords: document, API, guide)
+     • [{PROJ-100}]({JIRA_URL}/browse/PROJ-100) "Fix broken login flow" 
+       → Bug Fix (keywords: fix, broken, bug)
+     • [{PROJ-101}]({JIRA_URL}/browse/PROJ-101) "Document API endpoints" 
+       → Documentation (keywords: document, API, guide)
    
    Medium confidence (1-2 matches): 5 tickets
-     PROJ-102 "Improve performance" → Development (keywords: improve)
+     • [{PROJ-102}]({JIRA_URL}/browse/PROJ-102) "Improve performance" 
+       → Development (keywords: improve)
    
    Low confidence (issuetype heuristic): 3 tickets
-     PROJ-103 "Update system" → Development (Bug issuetype suggests bug fix, but no clear keywords)
+     • [{PROJ-103}]({JIRA_URL}/browse/PROJ-103) "Update system" 
+       → Development (Bug issuetype suggests bug fix, but no clear keywords)
    ```
 
 6. **Ask for confirmation**:

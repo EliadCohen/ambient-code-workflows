@@ -37,14 +37,14 @@ Optional: Override default thresholds
    - Save to `artifacts/jira-hygiene/candidates/close-stale.json`
    - Include: key, summary, priority, days since update, assignee
 
-4. **Display summary by priority**:
+4. **Display summary by priority with Jira links**:
    ```
    Found N stale tickets to close:
    
    Highest/High (>7 days): 3 tickets
-     PROJ-100 "Old critical bug" (12 days, assigned to John)
-     PROJ-101 "High priority feature" (9 days, unassigned)
-     PROJ-102 "Urgent fix needed" (8 days, assigned to Jane)
+     • [{PROJ-100}]({JIRA_URL}/browse/PROJ-100) "Old critical bug" (12 days, assigned to John)
+     • [{PROJ-101}]({JIRA_URL}/browse/PROJ-101) "High priority feature" (9 days, unassigned)
+     • [{PROJ-102}]({JIRA_URL}/browse/PROJ-102) "Urgent fix needed" (8 days, assigned to Jane)
    
    Medium (>14 days): 5 tickets
      ...
@@ -53,6 +53,8 @@ Optional: Override default thresholds
      ...
    
    Total: 20 tickets will be closed
+   
+   View all candidates: See artifacts/jira-hygiene/candidates/close-stale.json
    ```
 
 5. **Ask for confirmation**:

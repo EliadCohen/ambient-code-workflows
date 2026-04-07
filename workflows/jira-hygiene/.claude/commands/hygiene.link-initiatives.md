@@ -49,15 +49,19 @@ Find epics without initiative links and suggest appropriate initiatives from con
    - Save to `artifacts/jira-hygiene/candidates/link-initiatives.json`
    - Include: epic key, epic summary, suggested initiative (if any), match score
 
-5. **Display summary**:
+5. **Display summary with Jira links**:
    ```
    Found N orphaned epics:
    - M epics with good matches (≥50%)
    - P epics with no good match
    
+   View orphaned epics: {JIRA_URL}/issues/?jql=project+%3D+{PROJECT}+AND+issuetype+%3D+Epic+AND+%22Parent+Link%22+is+EMPTY
+   
    Top suggestions:
-   [EPIC-45] "Authentication System" → [INIT-12] "User Management Platform" (80% match)
-   [EPIC-46] "Payment Gateway" → No good match found (20% best match)
+   • [{EPIC-45}]({JIRA_URL}/browse/EPIC-45) "Authentication System" 
+     → [{INIT-12}]({JIRA_URL}/browse/INIT-12) "User Management Platform" (80% match)
+   • [{EPIC-46}]({JIRA_URL}/browse/EPIC-46) "Payment Gateway" 
+     → No good match found (20% best match)
    ```
 
 6. **Ask for confirmation**:
