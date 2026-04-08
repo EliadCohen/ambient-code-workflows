@@ -18,61 +18,84 @@ Optional:
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key and settings
+   - Extract base_jql and settings
 
-2. **Run all hygiene checks** (read-only queries):
+2. **Run all hygiene checks WITH PAGINATION** (read-only queries):
 
-   a. **Orphaned Stories**:
+   **Note**: All queries use base_jql and paginate to fetch complete counts
+   
+   **Standard pagination pattern for each query**:
+   ```
+   all_results = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={jql}&startAt={start_at}&maxResults={max_results}
+     results = response['issues']
+     all_results.extend(results)
+     
+     if start_at + len(results) >= response['total']:
+       break
+     
+     start_at += max_results
+     sleep(0.5)
+   ```
+
+   a. **Orphaned Stories WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND issuetype = Story AND "Epic Link" is EMPTY AND resolution = Unresolved
+      ({base_jql}) AND issuetype = Story AND "Epic Link" is EMPTY
       ```
-      - Count total orphaned stories
+      - Paginate to count ALL orphaned stories
       - List top 5 by age
 
-   b. **Orphaned Epics**:
+   b. **Orphaned Epics WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND issuetype = Epic AND "Parent Link" is EMPTY AND resolution = Unresolved
+      ({base_jql}) AND issuetype = Epic AND "Parent Link" is EMPTY
       ```
-      - Count total orphaned epics
+      - Paginate to count ALL orphaned epics
       - List top 5 by age
 
-   c. **Blocking Tickets**:
+   c. **Blocking Tickets WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND issueFunction in linkedIssuesOf("project = {PROJECT}", "blocks") AND resolution = Unresolved
+      ({base_jql}) AND issueFunction in linkedIssuesOf("({base_jql})", "blocks")
       ```
-      - Count total blocking tickets
+      - Paginate to count ALL blocking tickets
       - Count tickets being blocked
       - List all with blocked ticket counts
 
-   d. **Stale Tickets** (by priority):
+   d. **Stale Tickets BY PRIORITY WITH PAGINATION**:
+      - For each priority: `({base_jql}) AND priority = {PRIORITY} AND updated < -{DAYS}d`
       - Apply configured thresholds
+      - Paginate each priority query separately
       - Count by priority level
       - List top 5 oldest per priority
 
-   e. **Untriaged Items**:
+   e. **Untriaged Items WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND status = New AND created < -7d AND resolution = Unresolved
+      ({base_jql}) AND status = New AND created < -7d
       ```
-      - Count total untriaged
+      - Paginate to count ALL untriaged
       - List top 5 by age
 
-   f. **Blocking-Closed Mismatches**:
-      - Check blocking tickets where all blocked items are closed
+   f. **Blocking-Closed Mismatches WITH PAGINATION**:
+      - Query blocking tickets (with pagination)
+      - For each, check if all blocked items are closed
       - Count mismatches
       - List all
 
-   g. **In-Progress Unassigned**:
+   g. **In-Progress Unassigned WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND status = "In Progress" AND assignee is EMPTY AND resolution = Unresolved
+      ({base_jql}) AND status = "In Progress" AND assignee is EMPTY
       ```
-      - Count total
+      - Paginate to count ALL
       - List all
 
-   h. **Missing Activity Type**:
+   h. **Missing Activity Type WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND "Activity Type" is EMPTY AND resolution = Unresolved
+      ({base_jql}) AND "Activity Type" is EMPTY
       ```
-      - Count total
+      - Paginate to count ALL
       - List top 10 by priority
 
 3. **Calculate health score**:

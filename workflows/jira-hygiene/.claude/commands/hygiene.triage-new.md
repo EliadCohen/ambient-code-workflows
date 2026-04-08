@@ -18,12 +18,33 @@ Optional:
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key
+   - Extract base_jql
 
-2. **Query untriaged items**:
+2. **Query untriaged items WITH PAGINATION**:
    ```jql
-   project = {PROJECT} AND status = New AND created < -{DAYS}d AND resolution = Unresolved
+   ({base_jql}) AND status = New AND created < -{DAYS}d
    ```
+   
+   **Pagination logic**:
+   ```
+   all_untriaged = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={encoded_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,description,issuetype,created
+     items = response['issues']
+     all_untriaged.extend(items)
+     
+     Print: "Fetched {start_at + len(items)}/{response['total']} untriaged items..."
+     
+     if start_at + len(items) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - Fetch: key, summary, description, issuetype, created
    - If none found: report success and exit
 
@@ -33,12 +54,32 @@ Optional:
       - Combine summary + description
       - Remove stopwords
    
-   b. **Find similar items**:
+   b. **Find similar items WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND resolution = Unresolved AND text ~ "keyword1 keyword2" AND status != New
+      ({base_jql}) AND text ~ "keyword1 keyword2" AND status != New
       ```
+      
+      **Pagination for semantic search**:
+      ```
+      similar_items = []
+      start_at = 0
+      max_results = 50
+      
+      Loop:
+        response = GET /rest/api/3/search?jql={search_jql}&startAt={start_at}&maxResults={max_results}&fields=priority,status
+        items = response['issues']
+        similar_items.extend(items)
+        
+        if start_at + len(items) >= response['total']:
+          break  # All results fetched
+        
+        start_at += max_results
+        sleep(0.5)  # Rate limit
+      ```
+      
       - Find items that have been triaged (not in New status)
       - Fetch: priority, status
+      - Analyze priority distribution across ALL similar items (not just first 50)
    
    c. **Analyze priority distribution**:
       - Count priorities of similar items: {High: 5, Medium: 8, Low: 2}

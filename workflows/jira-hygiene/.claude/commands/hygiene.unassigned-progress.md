@@ -12,14 +12,36 @@ Simple query to find tickets that are marked as "In Progress" but have no assign
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key
+   - Extract base_jql (or use default if not present)
 
-2. **Query unassigned in-progress tickets**:
+2. **Query unassigned in-progress tickets WITH PAGINATION**:
    ```jql
-   project = {PROJECT} AND status = "In Progress" AND assignee is EMPTY AND resolution = Unresolved
+   ({base_jql}) AND status = "In Progress" AND assignee is EMPTY
    ```
+   
+   **Pagination logic**:
+   ```
+   all_tickets = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={encoded_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,status,created,updated,reporter&orderBy=updated DESC
+     tickets = response['issues']
+     all_tickets.extend(tickets)
+     
+     Print: "Fetched {start_at + len(tickets)}/{response['total']} tickets..."
+     
+     if start_at + len(tickets) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - Fetch: key, summary, status, created, updated, reporter
    - Order by updated descending
+   - If none found: report "No in-progress tickets without assignee" and exit
 
 3. **Format as markdown table with Jira links**:
    ```markdown

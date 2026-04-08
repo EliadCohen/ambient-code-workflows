@@ -12,12 +12,35 @@ Highlight tickets marked as "Blocking" where all of the blocked tickets are alre
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key
+   - Extract base_jql
 
-2. **Query tickets with "blocks" links**:
+2. **Query tickets with "blocks" links WITH PAGINATION**:
    ```jql
-   project = {PROJECT} AND issueFunction in linkedIssuesOf("project = {PROJECT}", "blocks") AND resolution = Unresolved
+   ({base_jql}) AND issueFunction in linkedIssuesOf("({base_jql})", "blocks")
    ```
+   
+   **Note**: Both outer query AND inner linkedIssuesOf query use base_jql for consistency
+   
+   **Pagination logic**:
+   ```
+   all_blocking_tickets = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={encoded_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,status
+     tickets = response['issues']
+     all_blocking_tickets.extend(tickets)
+     
+     Print: "Fetched {start_at + len(tickets)}/{response['total']} blocking tickets..."
+     
+     if start_at + len(tickets) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - This finds all unresolved tickets that block other tickets
    - Fetch: key, summary, status
 

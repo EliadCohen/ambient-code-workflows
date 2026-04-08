@@ -18,13 +18,34 @@ Optional:
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key, Activity Type field ID, and available values
+   - Extract base_jql, Activity Type field ID, and available values
    - If Activity Type field is not configured: prompt user to run `/hygiene.setup`
 
-2. **Query tickets missing Activity Type**:
+2. **Query tickets missing Activity Type WITH PAGINATION**:
    ```jql
-   project = {PROJECT} AND "{ACTIVITY_TYPE_FIELD_NAME}" is EMPTY AND resolution = Unresolved
+   ({base_jql}) AND "{ACTIVITY_TYPE_FIELD_NAME}" is EMPTY
    ```
+   
+   **Pagination logic**:
+   ```
+   all_tickets = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={encoded_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,description,issuetype
+     tickets = response['issues']
+     all_tickets.extend(tickets)
+     
+     Print: "Fetched {start_at + len(tickets)}/{response['total']} tickets missing Activity Type..."
+     
+     if start_at + len(tickets) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - Fetch: key, summary, description, issuetype
    - If none found: report success and exit
 

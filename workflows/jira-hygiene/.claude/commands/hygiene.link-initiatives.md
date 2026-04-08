@@ -13,13 +13,34 @@ Find epics without initiative links and suggest appropriate initiatives from con
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key and initiative_projects list
+   - Extract base_jql and initiative_projects list
    - If initiative_projects is empty: prompt user to configure via `/hygiene.setup`
 
-2. **Query orphaned epics**:
+2. **Query orphaned epics WITH PAGINATION**:
    ```jql
-   project = {PROJECT} AND issuetype = Epic AND "Parent Link" is EMPTY AND resolution = Unresolved
+   ({base_jql}) AND issuetype = Epic AND "Parent Link" is EMPTY
    ```
+   
+   **Pagination logic**:
+   ```
+   all_orphaned_epics = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={encoded_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,description
+     epics = response['issues']
+     all_orphaned_epics.extend(epics)
+     
+     Print: "Fetched {start_at + len(epics)}/{response['total']} orphaned epics..."
+     
+     if start_at + len(epics) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - Fetch: key, summary, description
    - If none found: report success and exit
 
@@ -29,12 +50,34 @@ Find epics without initiative links and suggest appropriate initiatives from con
       - Same process as `/hygiene.link-epics`
       - Combine summary + description, remove stopwords
    
-   b. **Search for matching initiatives** (cross-project):
+   b. **Search for matching initiatives WITH PAGINATION** (cross-project):
       ```jql
       project in ({INIT1},{INIT2}) AND issuetype = Initiative AND resolution = Unresolved AND text ~ "keyword1 keyword2"
       ```
+      
+      **Note**: Initiative search uses different project list, so base_jql is NOT applied here
+      
+      **Pagination for cross-project search**:
+      ```
+      matching_initiatives = []
+      start_at = 0
+      max_results = 50
+      
+      Loop:
+        response = GET /rest/api/3/search?jql={search_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,project
+        initiatives = response['issues']
+        matching_initiatives.extend(initiatives)
+        
+        if start_at + len(initiatives) >= response['total']:
+          break  # All results fetched
+        
+        start_at += max_results
+        sleep(0.5)  # Rate limit
+      ```
+      
       - Search across all configured initiative projects
       - Fetch: key, summary, project
+      - Calculate match scores for ALL initiatives returned (not just first 50)
    
    c. **Calculate match scores**:
       - Score = (matching_keywords / total_keywords) * 100

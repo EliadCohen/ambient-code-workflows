@@ -26,17 +26,62 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
      - Provide JQL filter (e.g., "project = PROJ AND issuetype = Epic")
      - Use "all active epics" (default: all unresolved epics in project)
 
-3. **Fetch selected epics/initiatives**:
+3. **Fetch selected epics/initiatives WITH PAGINATION**:
    - Execute JQL query to get target issues
+   
+   **Pagination logic** (if using JQL filter):
+   ```
+   all_epics = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={user_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,issuetype
+     epics = response['issues']
+     all_epics.extend(epics)
+     
+     Print: "Fetched {start_at + len(epics)}/{response['total']} epics/initiatives..."
+     
+     if start_at + len(epics) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - Fetch: key, summary, issuetype
 
 4. **For each epic/initiative**:
    
-   a. **Fetch child issues**:
+   a. **Fetch child issues WITH PAGINATION**:
       ```jql
       parent = {EPIC_KEY} AND resolution = Unresolved
       ```
-      - Get all child stories/tasks
+      
+      **Note**: Child queries do NOT use base_jql (children can cross project boundaries)
+      
+      **Pagination logic**:
+      ```
+      all_children = []
+      start_at = 0
+      max_results = 50
+      
+      Loop:
+        response = GET /rest/api/3/search?jql={child_jql}&startAt={start_at}&maxResults={max_results}
+        children = response['issues']
+        all_children.extend(children)
+        
+        Print: "Fetched {len(all_children)}/{response['total']} children for {EPIC_KEY}..."
+        
+        if start_at + len(children) >= response['total']:
+          break
+        
+        start_at += max_results
+        sleep(0.5)  # Rate limit
+      ```
+      
+      - Get all child stories/tasks (not limited to 50)
+      - Then analyze activity for ALL children
    
    b. **Analyze activity for each child** (past 7 days):
       - Fetch changelog: GET `/rest/api/3/issue/{childKey}/changelog`

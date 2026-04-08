@@ -31,20 +31,37 @@ Environment variables must be set:
    - **Initiative project keys**: Comma-separated list of projects containing initiatives (e.g., "INIT1,INIT2")
    - User must provide the exact project keys they want to use
 
-4. **Fetch Activity Type field metadata**:
+4. **Prompt for base JQL filter (optional)**:
+   - **Base JQL filter**: Custom JQL to scope all operations
+   - If empty/skipped: Use default `"project = {PROJECT} AND resolution = Unresolved"`
+   - Examples:
+     - `"project = MYPROJ AND resolution = Unresolved AND labels = backend"`
+     - `"project in (PROJ1, PROJ2) AND resolution = Unresolved AND team = Platform"`
+     - `"project = MYPROJ AND resolution = Unresolved AND component = API"`
+   - Explain: This filter will be combined with each command's specific conditions
+
+4a. **Validate base JQL (if provided)**:
+   - Test query via `GET /rest/api/3/search?jql={encoded_jql}&maxResults=1`
+   - If 400 error: Show JQL syntax error, ask user to correct and retry
+   - If 200: Proceed with valid JQL
+   - If empty/skipped: Use default `"project = {PROJECT} AND resolution = Unresolved"`
+
+5. **Fetch Activity Type field metadata**:
    - Call `/rest/api/3/field` to get all custom fields
    - Search for field with name matching "Activity Type" (case-insensitive)
    - Extract field ID (e.g., "customfield_10050")
    - Fetch allowed values for this field
    - If not found: note in config, skip this feature
 
-5. **Create config file**:
+6. **Create config file**:
    - Write all settings to `artifacts/jira-hygiene/config.json`
+   - Include base_jql (either user-provided or default)
    - Include default staleness thresholds
    - Format as pretty JSON for readability
 
-6. **Display summary**:
+7. **Display summary**:
    - Show configured project key
+   - Show base JQL filter
    - Show initiative project keys
    - Show Activity Type field ID and available values
    - Confirm setup is complete
@@ -59,6 +76,7 @@ Environment variables must be set:
 {
   "jira_url": "https://company.atlassian.net",
   "project_key": "PROJ",
+  "base_jql": "project = PROJ AND resolution = Unresolved",
   "initiative_projects": ["INIT1", "INIT2"],
   "activity_type_field_id": "customfield_10050",
   "activity_type_values": ["Development", "Bug Fix", "Documentation", "Research", "Testing"],
@@ -69,7 +87,7 @@ Environment variables must be set:
     "Low": 30,
     "Lowest": 30
   },
-  "configured_at": "2026-04-07T10:30:00Z"
+  "configured_at": "2026-04-08T10:30:00Z"
 }
 ```
 
@@ -79,3 +97,4 @@ Environment variables must be set:
 - **Auth failed (401)**: Suggest checking email/token, regenerating token
 - **Network error**: Check JIRA_URL format (must start with https://)
 - **Field not found**: Activity Type feature will be disabled, note in config
+

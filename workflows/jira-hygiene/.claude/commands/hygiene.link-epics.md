@@ -13,12 +13,33 @@ Find stories without epic links and suggest appropriate epics to link them to, u
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key
+   - Extract base_jql
 
-2. **Query orphaned stories**:
+2. **Query orphaned stories WITH PAGINATION**:
    ```jql
-   project = {PROJECT} AND issuetype = Story AND "Epic Link" is EMPTY AND resolution = Unresolved
+   ({base_jql}) AND issuetype = Story AND "Epic Link" is EMPTY
    ```
+   
+   **Pagination logic**:
+   ```
+   all_orphaned_stories = []
+   start_at = 0
+   max_results = 50
+   
+   Loop:
+     response = GET /rest/api/3/search?jql={encoded_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,description
+     stories = response['issues']
+     all_orphaned_stories.extend(stories)
+     
+     Print: "Fetched {start_at + len(stories)}/{response['total']} orphaned stories..."
+     
+     if start_at + len(stories) >= response['total']:
+       break  # All results fetched
+     
+     start_at += max_results
+     sleep(0.5)  # Rate limit
+   ```
+   
    - Fetch: key, summary, description
    - If none found: report success and exit
 
@@ -30,12 +51,32 @@ Find stories without epic links and suggest appropriate epics to link them to, u
       - Keep technical terms (API, auth, payment, database, etc.)
       - Lowercase and deduplicate
    
-   b. **Search for matching epics**:
+   b. **Search for matching epics WITH PAGINATION**:
       ```jql
-      project = {PROJECT} AND issuetype = Epic AND resolution = Unresolved AND text ~ "keyword1 keyword2 keyword3"
+      ({base_jql}) AND issuetype = Epic AND text ~ "keyword1 keyword2 keyword3"
       ```
+      
+      **Pagination for semantic search**:
+      ```
+      matching_epics = []
+      start_at = 0
+      max_results = 50
+      
+      Loop:
+        response = GET /rest/api/3/search?jql={search_jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary
+        epics = response['issues']
+        matching_epics.extend(epics)
+        
+        if start_at + len(epics) >= response['total']:
+          break  # All results fetched
+        
+        start_at += max_results
+        sleep(0.5)  # Rate limit
+      ```
+      
       - Start with all keywords; if no results, try top 3 keywords
       - Fetch: key, summary
+      - Calculate match scores for ALL epics returned (not just first 50)
    
    c. **Calculate match scores**:
       - For each epic found, count keywords that appear in epic summary

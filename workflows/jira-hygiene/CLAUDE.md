@@ -132,6 +132,7 @@ The workflow uses `artifacts/jira-hygiene/config.json` to cache:
 {
   "jira_url": "https://company.atlassian.net",
   "project_key": "PROJ",
+  "base_jql": "project = PROJ AND resolution = Unresolved",
   "initiative_projects": ["INIT1", "INIT2"],
   "activity_type_field_id": "customfield_10050",
   "activity_type_values": ["Development", "Bug Fix", "Documentation", "Research"],
@@ -146,6 +147,48 @@ The workflow uses `artifacts/jira-hygiene/config.json` to cache:
 ```
 
 This file is created by `/hygiene.setup` and read by other commands. It avoids repeated API calls for field metadata.
+
+## Pagination
+
+All commands automatically fetch ALL matching results using pagination:
+
+**How it works**:
+- Jira API returns max 50 results by default
+- Commands use `startAt` parameter to fetch in pages (0, 50, 100, ...)
+- Loop continues until all results fetched
+- Progress shown: "Fetched 150/237 tickets..."
+
+**User impact**:
+- No manual intervention needed
+- Large projects (>50 orphaned stories, >100 stale tickets) now fully supported
+- Slightly longer execution time for large datasets (0.5s per page)
+
+**Example**: Project with 237 orphaned stories
+- Old behavior: Only first 50 analyzed (187 missed)
+- New behavior: All 237 fetched (5 pages × 0.5s = 2.5s extra time)
+
+## Base JQL Filter
+
+Customize which tickets are included in all operations using base_jql:
+
+**Setup**: During `/hygiene.setup`, provide optional base JQL filter
+
+**Default**: `project = {PROJECT} AND resolution = Unresolved`
+
+**Examples**:
+- Scope to team: `project = MYPROJ AND resolution = Unresolved AND labels = backend`
+- Multiple projects: `project in (PROJ1, PROJ2) AND resolution = Unresolved`
+- Custom field: `project = MYPROJ AND resolution = Unresolved AND "Team" = Platform`
+
+**How it's used**:
+- Combined with command-specific filters
+- Example: link-epics uses `({base_jql}) AND issuetype = Story AND "Epic Link" is EMPTY`
+- Applied to all queries except child relationships
+
+**When NOT to use**:
+- Don't include `issuetype` (commands add this)
+- Don't filter by status for specific tickets (may break linking logic)
+- Don't add `updated < -Xd` (close-stale handles this)
 
 ## Testing
 

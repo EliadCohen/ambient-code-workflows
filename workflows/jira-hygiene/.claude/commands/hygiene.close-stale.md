@@ -22,14 +22,44 @@ Optional: Override default thresholds
 
 1. **Load configuration**:
    - Read `artifacts/jira-hygiene/config.json`
-   - Extract project key and staleness_thresholds
+   - Extract base_jql and staleness_thresholds
    - Apply any command-line overrides
 
-2. **Query stale tickets by priority**:
+2. **Query stale tickets by priority WITH PAGINATION**:
+   
    For each priority level (Highest, High, Medium, Low, Lowest):
    ```jql
-   project = {PROJECT} AND priority = {PRIORITY} AND updated < -{DAYS}d AND resolution = Unresolved
+   ({base_jql}) AND priority = {PRIORITY} AND updated < -{DAYS}d
    ```
+   
+   **Pagination per priority**:
+   ```
+   all_stale = {}
+   
+   for priority in ["Highest", "High", "Medium", "Low", "Lowest"]:
+     days = staleness_thresholds[priority]
+     jql = f"({base_jql}) AND priority = {priority} AND updated < -{days}d"
+     
+     priority_tickets = []
+     start_at = 0
+     max_results = 50
+     
+     Loop:
+       response = GET /rest/api/3/search?jql={jql}&startAt={start_at}&maxResults={max_results}&fields=key,summary,assignee,status,updated,priority
+       tickets = response['issues']
+       priority_tickets.extend(tickets)
+       
+       Print: "Fetched {len(priority_tickets)}/{response['total']} {priority} priority tickets..."
+       
+       if start_at + len(tickets) >= response['total']:
+         break
+       
+       start_at += max_results
+       sleep(0.5)
+     
+     all_stale[priority] = priority_tickets
+   ```
+   
    - Fetch: key, summary, assignee, status, updated, priority
    - Group results by priority
 
