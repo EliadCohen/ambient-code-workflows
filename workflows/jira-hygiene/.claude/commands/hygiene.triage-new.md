@@ -22,8 +22,10 @@ Optional:
 
 2. **Query untriaged items WITH PAGINATION**:
    ```jql
-   ({base_jql}) AND status = New AND created < -{DAYS}d
+   ({base_jql}) AND status = New AND status changed TO New BEFORE -{DAYS}d
    ```
+   
+   **Note**: Uses time-in-status (status changed TO New) instead of creation date to avoid misclassifying tickets moved back to New
    
    **Pagination logic**:
    ```
@@ -116,13 +118,15 @@ Optional:
        → Priority: Medium (default, no similar items)
    ```
 
-6. **Ask for confirmation**:
+6. **Ask for confirmation** (batch mode):
    - If `--dry-run`: Skip, display "DRY RUN - No changes made"
-   - Otherwise prompt: "Apply triage suggestions? (yes/no/high-confidence-only)"
+   - Otherwise, split approved items into batches of max 50
+   - For each batch, prompt: "Apply triage suggestions? (yes/no/high-confidence-only)"
+   - Only proceed on exact response "yes" (reject other responses)
    - "high-confidence-only": Only apply suggestions with ≥5 similar items
 
-7. **Execute triage**:
-   - For each approved item:
+7. **Execute triage** (per batch):
+   - For each approved item in current batch:
      - Update priority via PUT `/rest/api/3/issue/{key}`
      - Transition to "Backlog" status
      - Add comment: "Auto-triaged based on similar items. Priority set to {PRIORITY}."

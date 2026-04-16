@@ -9,6 +9,11 @@ Find stories without epic links and suggest appropriate epics to link them to, u
 - `/hygiene.setup` must be run first to create `artifacts/jira-hygiene/config.json`
 - Project key must be configured
 
+## Arguments
+
+Optional:
+- `--dry-run` - Run steps 1-4 (Query, Analyze, Save, Display) only, skip confirmation and API mutations
+
 ## Process
 
 1. **Load configuration**:
@@ -108,14 +113,17 @@ Find stories without epic links and suggest appropriate epics to link them to, u
    ```
 
 6. **Ask for confirmation**:
-   - Prompt: "Apply these suggestions? (yes/no/show-details)"
+   - If `--dry-run`: Display "DRY RUN - No changes made" and skip to step 8
+   - Otherwise prompt: "Apply these suggestions? (yes/no/show-details)"
    - If "show-details": display full candidate list with match details
    - If "no": exit without changes
    - If "yes": proceed to execution
 
-7. **Execute linking operations**:
+7. **Execute linking operations** (skip if --dry-run):
    - For each approved linking suggestion:
-     - Update story via PUT `/rest/api/3/issue/{storyKey}`
+     - **TOCTOU check**: GET `/rest/api/3/issue/{storyKey}?fields=customfield_epic_link` to verify Epic Link is still empty
+     - If Epic Link is not empty: skip and log "Story already linked to {existing_epic}"
+     - Otherwise, update story via PUT `/rest/api/3/issue/{storyKey}`
      - Set Epic Link field (typically using "update" operation)
      - Rate limit: 0.5s between requests
    - For "create epic" suggestions: skip for now, just log recommendation

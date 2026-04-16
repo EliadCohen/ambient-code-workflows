@@ -16,8 +16,10 @@ Simple query to find tickets that are marked as "In Progress" but have no assign
 
 2. **Query unassigned in-progress tickets WITH PAGINATION**:
    ```jql
-   ({base_jql}) AND status = "In Progress" AND assignee is EMPTY
+   ({base_jql}) AND statusCategory = "In Progress" AND assignee is EMPTY
    ```
+   
+   **Note**: Uses statusCategory instead of hardcoded status name to match all in-progress statuses across different projects
    
    **Pagination logic**:
    ```

@@ -23,7 +23,7 @@ Optional:
 
 2. **Query tickets missing Activity Type WITH PAGINATION**:
    ```jql
-   ({base_jql}) AND "{ACTIVITY_TYPE_FIELD_NAME}" is EMPTY
+   ({base_jql}) AND "{ACTIVITY_TYPE_FIELD_ID}" is EMPTY
    ```
    
    **Pagination logic**:
@@ -99,12 +99,15 @@ Optional:
        → Development (Bug issuetype suggests bug fix, but no clear keywords)
    ```
 
-6. **Ask for confirmation**:
+6. **Ask for confirmation** (batch mode):
    - If `--dry-run`: Skip, display "DRY RUN - No changes made"
-   - Otherwise prompt: "Apply Activity Type suggestions? (yes/no/high-confidence-only)"
+   - Otherwise, split approved tickets into batches of max 50
+   - For each batch, prompt: "Apply Activity Type suggestions for {N} tickets? (yes/no/high-confidence-only)"
+   - Only proceed on exact response "yes" (reject other responses)
+   - If "high-confidence-only": apply only tickets with ≥3 keyword matches
 
-7. **Execute updates**:
-   - For each approved ticket:
+7. **Execute updates** (per batch):
+   - For each approved ticket in the current batch:
      - Update custom field via PUT `/rest/api/3/issue/{key}`
      - Payload: `{"fields": {"{FIELD_ID}": {"value": "{ACTIVITY_TYPE}"}}}`
      - Rate limit: 0.5s between tickets

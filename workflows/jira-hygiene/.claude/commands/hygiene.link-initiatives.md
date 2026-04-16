@@ -9,6 +9,11 @@ Find epics without initiative links and suggest appropriate initiatives from con
 - `/hygiene.setup` must be run first
 - Initiative projects must be configured in config.json
 
+## Arguments
+
+Optional:
+- `--dry-run` - Run steps 1-4 (Query, Analyze, Save, Display) only, skip confirmation and API modifications
+
 ## Process
 
 1. **Load configuration**:
@@ -108,12 +113,15 @@ Find epics without initiative links and suggest appropriate initiatives from con
    ```
 
 6. **Ask for confirmation**:
-   - Prompt: "Apply these suggestions? (yes/no/show-details)"
+   - If `--dry-run`: Display "DRY RUN - No changes made" and skip to step 8
+   - Otherwise prompt: "Apply these suggestions? (yes/no/show-details)"
    - Only link epics with good matches (≥50%)
 
-7. **Execute linking operations**:
+7. **Execute linking operations** (skip if --dry-run):
    - For each approved linking:
-     - Update epic via PUT `/rest/api/3/issue/{epicKey}`
+     - **TOCTOU check**: GET `/rest/api/3/issue/{epicKey}?fields=parent` to verify Parent Link is still empty
+     - If Parent Link is not empty: skip and log "Epic already linked to {existing_initiative}"
+     - Otherwise, update epic via PUT `/rest/api/3/issue/{epicKey}`
      - Set Parent Link field to initiative key
      - Rate limit: 0.5s between requests
 

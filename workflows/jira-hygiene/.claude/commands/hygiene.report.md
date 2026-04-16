@@ -93,8 +93,9 @@ Optional:
 
    h. **Missing Activity Type WITH PAGINATION**:
       ```jql
-      ({base_jql}) AND "Activity Type" is EMPTY
+      ({base_jql}) AND "{activity_type_field_id}" is EMPTY
       ```
+      - Use activity_type_field_id from config.json (e.g., "customfield_10050")
       - Paginate to count ALL
       - List top 10 by priority
 

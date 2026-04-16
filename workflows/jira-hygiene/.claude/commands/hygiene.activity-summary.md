@@ -13,6 +13,11 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
 - `GITHUB_TOKEN` - For direct GitHub API access if Jira integration unavailable
 - `GITLAB_TOKEN` - For direct GitLab API access if Jira integration unavailable
 
+## Arguments
+
+Optional:
+- `--dry-run` - Show summaries without posting them as comments (runs steps 1-4 only)
+
 ## Process
 
 1. **Load configuration**:
@@ -25,9 +30,12 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
      - Provide specific issue keys (comma-separated)
      - Provide JQL filter (e.g., "project = PROJ AND issuetype = Epic")
      - Use "all active epics" (default: all unresolved epics in project)
+   - **Always enforce unresolved scope**: Append "AND resolution = Unresolved" to any user-provided JQL
 
 3. **Fetch selected epics/initiatives WITH PAGINATION**:
    - Execute JQL query to get target issues
+   - **If user provided specific keys**: Fetch each key and filter to only include issues where `fields.resolution == null`
+   - **If user provided JQL**: Already enforced "AND resolution = Unresolved" in step 2
    
    **Pagination logic** (if using JQL filter):
    ```
@@ -53,14 +61,31 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
 
 4. **For each epic/initiative**:
    
-   a. **Fetch child issues WITH PAGINATION**:
-      ```jql
-      parent = {EPIC_KEY} AND resolution = Unresolved
-      ```
+   a. **Fetch child issues WITH PAGINATION** (logic varies by issue type):
+      
+      **If issue type is Initiative**:
+      1. First fetch child Epics:
+         ```jql
+         parent = {INITIATIVE_KEY} AND resolution = Unresolved
+         ```
+         Use pagination (max 50 per page) to fetch all child epics
+      
+      2. Then for each child Epic, fetch its child issues:
+         ```jql
+         parent = {EPIC_KEY} AND resolution = Unresolved
+         ```
+         Use pagination for each epic's children
+      
+      **If issue type is Epic**:
+      - Directly fetch child issues:
+        ```jql
+        parent = {EPIC_KEY} AND resolution = Unresolved
+        ```
+        Use pagination to fetch all children
       
       **Note**: Child queries do NOT use base_jql (children can cross project boundaries)
       
-      **Pagination logic**:
+      **Pagination logic** (apply to both Initiative→Epics and Epic→Children):
       ```
       all_children = []
       start_at = 0
@@ -71,7 +96,7 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
         children = response['issues']
         all_children.extend(children)
         
-        Print: "Fetched {len(all_children)}/{response['total']} children for {EPIC_KEY}..."
+        Print: "Fetched {len(all_children)}/{response['total']} children for {PARENT_KEY}..."
         
         if start_at + len(children) >= response['total']:
           break
@@ -80,8 +105,8 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
         sleep(0.5)  # Rate limit
       ```
       
-      - Get all child stories/tasks (not limited to 50)
-      - Then analyze activity for ALL children
+      - Get all child items (not limited to 50)
+      - Then analyze activity for ALL children across all levels
    
    b. **Analyze activity for each child** (past 7 days):
       - Fetch changelog: GET `/rest/api/3/issue/{childKey}/changelog`
@@ -120,10 +145,11 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
    - Format as markdown with epic key as header
 
 6. **Ask for confirmation**:
-   - Prompt: "Post these summaries as comments? (yes/no)"
+   - If `--dry-run`: Display "DRY RUN - Summaries generated but not posted" and skip to step 8
+   - Otherwise prompt: "Post these summaries as comments? (yes/no)"
    - Allow user to edit summaries before posting
 
-7. **Post summaries**:
+7. **Post summaries** (skip if --dry-run):
    - For each epic/initiative:
      - POST `/rest/api/3/issue/{epicKey}/comment`
      - Body: `{"body": "Weekly Activity Summary (YYYY-MM-DD):\n\n{summary_text}"}`
@@ -131,6 +157,7 @@ Generate weekly activity summaries for selected epics and initiatives by analyzi
 
 8. **Log results**:
    - Write to `artifacts/jira-hygiene/operations/activity-summary-{timestamp}.log`
+   - In --dry-run mode, log "DRY RUN - no comments posted"
 
 ## Output
 

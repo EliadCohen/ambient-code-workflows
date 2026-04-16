@@ -87,16 +87,18 @@ Optional: Override default thresholds
    View all candidates: See artifacts/jira-hygiene/candidates/close-stale.json
    ```
 
-5. **Ask for confirmation**:
+5. **Ask for confirmation** (batch mode):
    - If `--dry-run`: Skip this step, display "DRY RUN - No changes made"
    - Otherwise prompt: "Close these stale tickets? (yes/no/by-priority)"
    - "by-priority": Let user approve each priority group separately
+   - **Batch limit**: Split each priority group into batches of max 50 tickets
+   - For each batch, require explicit "yes" response to proceed (deny other responses)
 
-6. **Execute closure**:
-   - For each approved ticket:
+6. **Execute closure** (per batch):
+   - For each approved ticket in current batch:
      - Add comment: "Due to lack of activity, this item has been closed. If you feel that it should be addressed, please reopen it."
      - Transition to "Closed" or "Done" status (use project's closed status)
-     - POST `/rest/api/3/issue/{key}/comment` then PUT `/rest/api/3/issue/{key}/transitions`
+     - POST `/rest/api/3/issue/{key}/comment` then POST `/rest/api/3/issue/{key}/transitions`
      - Rate limit: 0.5s between tickets
 
 7. **Log results**:

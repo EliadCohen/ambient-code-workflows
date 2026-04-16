@@ -195,7 +195,7 @@ Customize which tickets are included in all operations using base_jql:
 Before submitting PR, verify:
 
 1. **Validate JSON**: `jq . .ambient/ambient.json` (no syntax errors)
-2. **Check commands**: All 10 command files exist in `.claude/commands/`
+2. **Check commands**: All 11 command files exist in `.claude/commands/`
 3. **Test dry-run**: Run `/hygiene.close-stale --dry-run` without making changes
 4. **Verify logging**: Operation logs contain timestamp, action, results
 5. **Check rate limiting**: Monitor API call timing (≥0.5s gaps)
